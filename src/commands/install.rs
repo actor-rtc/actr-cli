@@ -4,6 +4,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
+use clap::Args;
 
 use crate::core::{
     ActrCliError, Command, CommandContext, CommandResult, ComponentType, DependencySpec,
@@ -11,13 +12,27 @@ use crate::core::{
 };
 
 /// Install 命令
+#[derive(Args, Debug)]
+#[command(
+    about = "Install service dependencies",
+    long_about = "安装服务依赖。可以安装指定的服务包，或者安装 Actr.toml 中配置的所有依赖"
+)]
 pub struct InstallCommand {
-    packages: Vec<String>,
-    #[allow(dead_code)]
-    force: bool,
-    force_update: bool,
-    #[allow(dead_code)]
-    skip_verification: bool,
+    /// 要安装的服务包列表（例如：actr://user-service@1.0.0/）
+    #[arg(value_name = "PACKAGE")]
+    pub packages: Vec<String>,
+
+    /// 强制重新安装
+    #[arg(long)]
+    pub force: bool,
+
+    /// 强制更新所有依赖
+    #[arg(long)]
+    pub force_update: bool,
+
+    /// 跳过指纹验证
+    #[arg(long)]
+    pub skip_verification: bool,
 }
 
 #[async_trait]
@@ -113,6 +128,16 @@ impl InstallCommand {
             force,
             force_update,
             skip_verification,
+        }
+    }
+
+    // 从 clap Args 创建
+    pub fn from_args(args: &InstallCommand) -> Self {
+        InstallCommand {
+            packages: args.packages.clone(),
+            force: args.force,
+            force_update: args.force_update,
+            skip_verification: args.skip_verification,
         }
     }
 

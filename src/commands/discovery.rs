@@ -4,6 +4,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
+use clap::Args;
 
 use crate::core::{
     ActrCliError, Command, CommandContext, CommandResult, ComponentType, DependencySpec,
@@ -11,11 +12,23 @@ use crate::core::{
 };
 
 /// Discovery 命令
+#[derive(Args, Debug)]
+#[command(
+    about = "Discover network services",
+    long_about = "发现网络中的 Actor 服务，可以查看可用服务并选择安装"
+)]
 pub struct DiscoveryCommand {
-    filter: Option<String>,
-    #[allow(dead_code)]
-    verbose: bool,
-    auto_install: bool,
+    /// 服务名称过滤模式（例如：user-*）
+    #[arg(long, value_name = "PATTERN")]
+    pub filter: Option<String>,
+
+    /// 显示详细信息
+    #[arg(long)]
+    pub verbose: bool,
+
+    /// 自动安装选中的服务
+    #[arg(long)]
+    pub auto_install: bool,
 }
 
 #[async_trait]
@@ -119,6 +132,15 @@ impl DiscoveryCommand {
             filter,
             verbose,
             auto_install,
+        }
+    }
+
+    // 从 clap Args 创建
+    pub fn from_args(args: &DiscoveryCommand) -> Self {
+        DiscoveryCommand {
+            filter: args.filter.clone(),
+            verbose: args.verbose,
+            auto_install: args.auto_install,
         }
     }
 

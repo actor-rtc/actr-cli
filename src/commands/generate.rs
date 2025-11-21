@@ -10,12 +10,16 @@ use crate::error::{ActrCliError, Result};
 // 只导入必要的类型，避免拉入不需要的依赖如 sqlite
 // use actr_framework::prelude::*;
 use async_trait::async_trait;
-use clap::Parser;
+use clap::Args;
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
 use tracing::{debug, info, warn};
 
-#[derive(Parser, Debug, Clone)]
+#[derive(Args, Debug, Clone)]
+#[command(
+    about = "Generate code from proto files",
+    long_about = "从 proto 文件生成 Rust Actor 代码，包括 protobuf 消息类型、Actor 基础设施代码和用户业务逻辑框架"
+)]
 pub struct GenCommand {
     /// 输入的 proto 文件或目录
     #[arg(short, long, default_value = "proto")]
@@ -25,17 +29,21 @@ pub struct GenCommand {
     #[arg(short, long, default_value = "src/generated")]
     pub output: PathBuf,
 
-    /// 是否生成用户代码框架
-    #[arg(long, default_value = "true")]
-    pub generate_scaffold: bool,
+    /// Clean generated outputs before regenerating
+    #[arg(long = "clean")]
+    pub clean: bool,
+
+    /// Skip user code scaffold generation
+    #[arg(long = "no-scaffold")]
+    pub no_scaffold: bool,
 
     /// 是否覆盖已存在的用户代码文件
     #[arg(long)]
     pub overwrite_user_code: bool,
 
-    /// 是否运行 rustfmt 格式化生成的代码
-    #[arg(long, default_value = "true")]
-    pub format: bool,
+    /// Skip rustfmt formatting
+    #[arg(long = "no-format")]
+    pub no_format: bool,
 
     /// 调试模式：保留中间生成文件
     #[arg(long)]
@@ -50,30 +58,35 @@ impl Command for GenCommand {
         // 1. 验证输入
         self.validate_inputs()?;
 
-        // 2. 准备输出目录
+        // 2. 清理旧的生成产物（可选）
+        self.clean_generated_outputs()?;
+
+        // 3. 准备输出目录
         self.prepare_output_dirs()?;
 
-        // 3. 发现 proto 文件
+        // 4. 发现 proto 文件
         let proto_files = self.discover_proto_files()?;
         info!("📁 发现 {} 个 proto 文件", proto_files.len());
 
-        // 4. 生成基础设施代码
+        // 5. 生成基础设施代码
         self.generate_infrastructure_code(&proto_files).await?;
 
-        // 5. 生成用户代码框架
-        if self.generate_scaffold {
+        // 6. 生成用户代码框架
+        if self.should_generate_scaffold() {
             self.generate_user_code_scaffold(&proto_files).await?;
         }
 
-        // 6. 格式化代码
-        if self.format {
+        // 7. 格式化代码
+        if self.should_format() {
             self.format_generated_code().await?;
         }
 
-        // 7. 验证生成的代码
+        // 8. 验证生成的代码
         self.validate_generated_code().await?;
 
         info!("✅ 代码生成完成！");
+        // Set all generated files to read-only only after generation, formatting, and validation are complete, to not interfere with rustfmt or other steps.
+        self.set_generated_files_readonly()?;
         self.print_next_steps();
 
         Ok(())
@@ -81,6 +94,72 @@ impl Command for GenCommand {
 }
 
 impl GenCommand {
+    /// Whether user code scaffold should be generated
+    fn should_generate_scaffold(&self) -> bool {
+        !self.no_scaffold
+    }
+
+    /// Whether formatting should run
+    fn should_format(&self) -> bool {
+        !self.no_format
+    }
+
+    /// Remove previously generated files when --clean is used
+    fn clean_generated_outputs(&self) -> Result<()> {
+        use std::fs;
+
+        if !self.clean {
+            return Ok(());
+        }
+
+        if !self.output.exists() {
+            return Ok(());
+        }
+
+        info!("🧹 清理旧的生成结果: {:?}", self.output);
+
+        self.make_writable_recursive(&self.output)?;
+        fs::remove_dir_all(&self.output)
+            .map_err(|e| ActrCliError::config_error(format!("删除生成目录失败: {e}")))?;
+
+        Ok(())
+    }
+
+    /// Ensure all files are writable so removal works across platforms
+    fn make_writable_recursive(&self, path: &Path) -> Result<()> {
+        use std::fs;
+
+        if path.is_file() {
+            let metadata = fs::metadata(path)
+                .map_err(|e| ActrCliError::config_error(format!("读取文件元数据失败: {e}")))?;
+            let mut permissions = metadata.permissions();
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = permissions.mode();
+                permissions.set_mode(mode | 0o222);
+            }
+
+            #[cfg(not(unix))]
+            {
+                permissions.set_readonly(false);
+            }
+
+            fs::set_permissions(path, permissions)
+                .map_err(|e| ActrCliError::config_error(format!("重置文件权限失败: {e}")))?;
+        } else if path.is_dir() {
+            for entry in fs::read_dir(path)
+                .map_err(|e| ActrCliError::config_error(format!("读取目录失败: {e}")))?
+            {
+                let entry = entry.map_err(|e| ActrCliError::config_error(e.to_string()))?;
+                self.make_writable_recursive(&entry.path())?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// 读取 Actr.toml 中的 manufacturer
     fn read_manufacturer(&self) -> Result<String> {
         use std::fs;
@@ -123,7 +202,7 @@ impl GenCommand {
         std::fs::create_dir_all(&self.output)
             .map_err(|e| ActrCliError::config_error(format!("创建输出目录失败: {e}")))?;
 
-        if self.generate_scaffold {
+        if self.should_generate_scaffold() {
             let user_code_dir = self.output.join("../");
             std::fs::create_dir_all(&user_code_dir)
                 .map_err(|e| ActrCliError::config_error(format!("创建用户代码目录失败: {e}")))?;
@@ -381,9 +460,6 @@ impl GenCommand {
 
         // 生成 mod.rs
         self.generate_mod_rs(proto_files).await?;
-
-        // 为生成的文件添加只读属性（防止误修改）
-        self.set_generated_files_readonly()?;
 
         info!("✅ 基础设施代码生成完成");
         Ok(())
@@ -749,13 +825,17 @@ mod tests {{
         println!("\n🎉 代码生成完成！");
         println!("\n📋 后续步骤：");
         println!("1. 📖 查看生成的代码: {:?}", self.output);
-        if self.generate_scaffold {
+        if self.should_generate_scaffold() {
             println!("2. ✏️  实现业务逻辑: 在 src/ 目录下的 *_service.rs 文件中");
             println!("3. 🔧 添加依赖: 在 Cargo.toml 中添加需要的依赖包");
+            println!("4. 🏗️  编译项目: cargo build");
+            println!("5. 🧪 运行测试: cargo test");
+            println!("6. 🚀 启动服务: cargo run");
+        } else {
+            println!("2. 🏗️  编译项目: cargo build");
+            println!("3. 🧪 运行测试: cargo test");
+            println!("4. 🚀 启动服务: cargo run");
         }
-        println!("4. 🏗️  编译项目: cargo build");
-        println!("5. 🧪 运行测试: cargo test");
-        println!("6. 🚀 启动服务: cargo run");
         println!("\n💡 提示: 查看生成的用户代码文件中的详细使用指南");
     }
 }

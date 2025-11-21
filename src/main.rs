@@ -4,13 +4,12 @@
 //! 提供一致的用户体验和高代码复用率。
 
 use anyhow::Result;
-use std::collections::HashMap;
+use clap::{Parser, Subcommand};
 use std::sync::Arc;
 
 // 导入核心复用组件
 use actr_cli::core::{
-    ActrCliError, Command, CommandArgs, CommandContext, ContainerBuilder, ErrorReporter,
-    ServiceContainer,
+    ActrCliError, Command, CommandContext, ContainerBuilder, ErrorReporter, ServiceContainer,
 };
 
 // 导入命令实现
@@ -18,13 +17,48 @@ use actr_cli::commands::{
     Command as LegacyCommand, DiscoveryCommand, GenCommand, InitCommand, InstallCommand,
 };
 
+/// ACTR-CLI - Actor-RTC Command Line Tool
+#[derive(Parser)]
+#[command(name = "actr")]
+#[command(about = "Actor-RTC 命令行工具", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Initialize a new Actor project
+    Init(InitCommand),
+
+    /// Install service dependencies
+    Install(InstallCommand),
+
+    /// Discover network services
+    Discovery(DiscoveryCommand),
+
+    /// Generate code from proto files
+    Gen(GenCommand),
+
+    /// Validate project dependencies
+    Check {
+        /// Show detailed information
+        #[arg(long)]
+        verbose: bool,
+
+        /// Set timeout in seconds
+        #[arg(long, value_name = "SECONDS")]
+        timeout: Option<u64>,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // 初始化日志
     tracing_subscriber::fmt::init();
 
-    // 解析命令行参数（简化版本）
-    let args = parse_args();
+    // 使用 clap 解析命令行参数
+    let cli = Cli::parse();
 
     // 构建服务容器并注册组件
     let container = build_container().await?;
@@ -32,12 +66,17 @@ async fn main() -> Result<()> {
     // 创建命令执行上下文
     let context = CommandContext {
         container: Arc::new(std::sync::Mutex::new(container)),
-        args: args.clone(),
+        args: actr_cli::core::CommandArgs {
+            command: String::new(),
+            subcommand: None,
+            flags: std::collections::HashMap::new(),
+            positional: Vec::new(),
+        },
         working_dir: std::env::current_dir()?,
     };
 
     // 根据命令分发执行
-    match execute_command(&context).await {
+    match execute_command(&cli.command, &context).await {
         Ok(result) => match result {
             actr_cli::core::CommandResult::Success(msg) => {
                 if msg != "Help displayed" {
@@ -73,45 +112,6 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// 解析命令行参数 (简化版本)
-fn parse_args() -> CommandArgs {
-    let args: Vec<String> = std::env::args().collect();
-
-    if args.len() < 2 {
-        return CommandArgs {
-            command: "help".to_string(),
-            subcommand: None,
-            flags: HashMap::new(),
-            positional: Vec::new(),
-        };
-    }
-
-    let command = args[1].clone();
-    let mut flags = HashMap::new();
-    let mut positional = Vec::new();
-
-    // 简化的参数解析
-    for arg in &args[2..] {
-        if arg.starts_with("--") {
-            let flag = arg.trim_start_matches("--");
-            if let Some((key, value)) = flag.split_once('=') {
-                flags.insert(key.to_string(), value.to_string());
-            } else {
-                flags.insert(flag.to_string(), "true".to_string());
-            }
-        } else {
-            positional.push(arg.clone());
-        }
-    }
-
-    CommandArgs {
-        command,
-        subcommand: None,
-        flags,
-        positional,
-    }
-}
-
 /// 构建服务容器
 async fn build_container() -> Result<ServiceContainer> {
     let container = ContainerBuilder::new().config_path("Actr.toml").build()?;
@@ -128,36 +128,22 @@ async fn build_container() -> Result<ServiceContainer> {
 }
 
 /// 执行命令
-async fn execute_command(context: &CommandContext) -> Result<actr_cli::core::CommandResult> {
-    match context.args.command.as_str() {
-        "init" => {
-            let name = context.args.positional.first().cloned();
-            let signaling = context.args.flags.get("signaling").cloned();
-            let template = context.args.flags.get("template").cloned();
-            let project_name = context.args.flags.get("project-name").cloned();
-
-            let command = InitCommand {
-                name,
-                template,
-                project_name,
-                signaling,
-            };
-
+async fn execute_command(
+    command: &Commands,
+    context: &CommandContext,
+) -> Result<actr_cli::core::CommandResult> {
+    match command {
+        Commands::Init(cmd) => {
             // InitCommand 使用旧的 Command trait，直接执行
-            match command.execute().await {
+            match cmd.execute().await {
                 Ok(_) => Ok(actr_cli::core::CommandResult::Success(
                     "Project initialized".to_string(),
                 )),
                 Err(e) => Err(e.into()),
             }
         }
-        "install" => {
-            let packages = context.args.positional.clone();
-            let force = context.args.flags.contains_key("force");
-            let force_update = context.args.flags.contains_key("force-update");
-            let skip_verification = context.args.flags.contains_key("skip-verification");
-
-            let command = InstallCommand::new(packages, force, force_update, skip_verification);
+        Commands::Install(cmd) => {
+            let command = InstallCommand::from_args(cmd);
 
             // 验证所需组件
             {
@@ -168,12 +154,8 @@ async fn execute_command(context: &CommandContext) -> Result<actr_cli::core::Com
             // 执行命令
             command.execute(context).await
         }
-        "discovery" => {
-            let filter = context.args.flags.get("filter").cloned();
-            let verbose = context.args.flags.contains_key("verbose");
-            let auto_install = context.args.flags.contains_key("auto-install");
-
-            let command = DiscoveryCommand::new(filter, verbose, auto_install);
+        Commands::Discovery(cmd) => {
+            let command = DiscoveryCommand::from_args(cmd);
 
             // 验证所需组件
             {
@@ -184,99 +166,25 @@ async fn execute_command(context: &CommandContext) -> Result<actr_cli::core::Com
             // 执行命令
             command.execute(context).await
         }
-        "check" => {
+        Commands::Check { verbose, timeout } => {
             // TODO: 实现 check 命令
+            if *verbose {
+                println!("Check mode: verbose");
+            }
+            if let Some(t) = timeout {
+                println!("Timeout: {} seconds", t);
+            }
             Ok(actr_cli::core::CommandResult::Success(
                 "Check completed".to_string(),
             ))
         }
-        "gen" => {
-            let input = context
-                .args
-                .flags
-                .get("input")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| std::path::PathBuf::from("proto"));
-            let output = context
-                .args
-                .flags
-                .get("output")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| std::path::PathBuf::from("src/generated"));
-            let generate_scaffold = !context.args.flags.contains_key("no-scaffold");
-            let overwrite_user_code = context.args.flags.contains_key("overwrite-user-code");
-            let format = !context.args.flags.contains_key("no-format");
-            let debug = context.args.flags.contains_key("debug");
-
-            let command = GenCommand {
-                input,
-                output,
-                generate_scaffold,
-                overwrite_user_code,
-                format,
-                debug,
-            };
-
-            match command.execute().await {
-                Ok(_) => Ok(actr_cli::core::CommandResult::Success(
-                    "Generation completed".to_string(),
-                )),
-                Err(e) => Err(e.into()),
-            }
-        }
-        _ => {
-            print_help();
-            Ok(actr_cli::core::CommandResult::Success(
-                "Help displayed".to_string(),
-            ))
-        }
+        Commands::Gen(cmd) => match cmd.execute().await {
+            Ok(_) => Ok(actr_cli::core::CommandResult::Success(
+                "Generation completed".to_string(),
+            )),
+            Err(e) => Err(e.into()),
+        },
     }
-}
-
-/// 显示帮助信息
-fn print_help() {
-    println!(
-        r#"
-ACTR-CLI - Actor-RTC Command Line Tool
-
-Usage:
-    actr <COMMAND> [OPTIONS] [ARGS]
-
-Commands:
-    init               Initialize a new Actor project
-    install [DEPS...]  Install service dependencies
-        --force             Force reinstall
-        --force-update      Force update all dependencies
-        --skip-verification Skip fingerprint verification
-
-    check              Validate project dependencies
-        --verbose       Show detailed information
-        --timeout=N     Set timeout in seconds
-
-    gen                Generate code from proto files
-        --clean         Clean and regenerate
-        --scaffold      Generate user code templates
-
-    discovery          Discover network services
-        --filter=PATTERN    Service name filter
-        --verbose          Show detailed information
-        --auto-install     Auto-install selected services
-
-    run [SCRIPT]       Run project scripts
-    config             Manage configuration
-    doc                Generate documentation
-    fingerprint        Show service fingerprints
-
-    help               Show this help message
-
-Examples:
-    actr init my-service
-    actr install user-service@1.2.0
-    actr gen --clean
-    actr check --verbose
-    actr discovery --filter="user-*"
-"#
-    );
 }
 
 #[cfg(test)]
