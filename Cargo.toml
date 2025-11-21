@@ -1,6 +1,6 @@
 [package]
 name = "actr-cli"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.85"
 license = "Apache-2.0"
@@ -75,7 +75,7 @@ prost-types = "0.12"
 quote = "1.0"
 proc-macro2 = "1.0"
 bytes = "1.0"
-heck = "0.4"  # for case conversion
+heck = "0.4"        # for case conversion
 
 [dev-dependencies]
 tokio-test = "0.4"
