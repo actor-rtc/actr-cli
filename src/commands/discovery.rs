@@ -317,7 +317,7 @@ impl DiscoveryCommand {
         };
 
         match validation_pipeline
-            .validate_dependencies(&[dependency_spec.clone()])
+            .validate_dependencies(std::slice::from_ref(&dependency_spec))
             .await
         {
             Ok(validation_results) => {

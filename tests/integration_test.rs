@@ -47,7 +47,7 @@ test = "cargo test"
     assert_eq!(config.package.actr_type.manufacturer, "test-company");
     assert_eq!(config.package.actr_type.name, "test-service");
     assert_eq!(config.realm.realm_id, 1001);
-    assert_eq!(config.visible_in_discovery, true);
+    assert!(config.visible_in_discovery);
 
     // Verify scripts
     assert_eq!(config.scripts.get("dev"), Some(&"cargo run".to_string()));

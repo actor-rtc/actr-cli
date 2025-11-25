@@ -126,6 +126,7 @@ impl GenCommand {
     }
 
     /// Ensure all files are writable so removal works across platforms
+    #[allow(clippy::only_used_in_recursion)]
     fn make_writable_recursive(&self, path: &Path) -> Result<()> {
         use std::fs;
 

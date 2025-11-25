@@ -1,6 +1,6 @@
 [package]
 name = "actr-cli"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 rust-version = "1.85"
 license = "Apache-2.0"
@@ -14,10 +14,10 @@ path = "src/main.rs"
 
 [dependencies]
 # Actor-RTC crates - only what CLI actually needs
-actr-config = { path = "../actr/crates/config" }
-actr-protocol = { path = "../actr/crates/protocol" }
-actr-version = { path = "../actr/crates/version" }
-actr-framework-protoc-codegen = { path = "../actr/crates/framework-protoc-codegen" }
+actr-config = "0.1.3"
+actr-protocol = "0.1.3"
+actr-version = "0.1.3"
+actr-framework-protoc-codegen = "0.1.3"
 
 # Command line interface
 clap = { version = "4.4", features = ["derive", "cargo"] }
