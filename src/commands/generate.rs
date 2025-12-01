@@ -415,6 +415,7 @@ impl GenCommand {
             // 第一步：使用 prost 生成基础 protobuf 消息类型
             let mut cmd = StdCommand::new("protoc");
             cmd.arg(format!("--proto_path={}", self.input.display()))
+                .arg("--prost_opt=flat_output_dir")
                 .arg(format!("--prost_out={}", self.output.display()))
                 .arg(proto_file);
 
