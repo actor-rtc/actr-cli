@@ -179,7 +179,7 @@ impl GenCommand {
         let raw_config: actr_config::RawConfig = toml::from_str(&content)
             .map_err(|e| ActrCliError::config_error(format!("Failed to parse Actr.toml: {e}")))?;
 
-        Ok(raw_config.package.manufacturer)
+        Ok(raw_config.package.actr_type.manufacturer)
     }
 
     /// 验证输入参数

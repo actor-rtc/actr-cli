@@ -6,6 +6,8 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::sync::Arc;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 // 导入核心复用组件
 use actr_cli::core::{
@@ -55,7 +57,12 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<()> {
     // 初始化日志
-    tracing_subscriber::fmt::init();
+    let layer = tracing_subscriber::fmt::layer()
+        .with_target(true)
+        .with_level(true)
+        .with_line_number(true)
+        .with_file(true);
+    let _ = tracing_subscriber::registry().with(layer).try_init();
 
     // 使用 clap 解析命令行参数
     let cli = Cli::parse();
