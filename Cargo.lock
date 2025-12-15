@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "actr-cli"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "actr-config",
  "actr-framework-protoc-codegen",
@@ -43,9 +43,9 @@ dependencies = [
 
 [[package]]
 name = "actr-config"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac339116ae86d91baae398706b1cfb0fac7b86efb91d1fb16ee83c4c31d158dc"
+checksum = "f229ec0470a7f7d644832b320153c70087faaeb4627f818766f3fb623aff251a"
 dependencies = [
  "actr-protocol",
  "actr-version",
@@ -74,9 +74,9 @@ dependencies = [
 
 [[package]]
 name = "actr-framework-protoc-codegen"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85c62f8ea348cfb86b9b56dad62b3f29dd69b1feb287600f94ab18f2d4d3b930"
+checksum = "4ba710c439b3952d9e4dd0df14d050f1270ee5d65a81694683e84af97ae4e77a"
 dependencies = [
  "actr-framework",
  "actr-protocol",
