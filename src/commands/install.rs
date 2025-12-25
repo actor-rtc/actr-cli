@@ -1,6 +1,6 @@
-//! Install 命令实现
+//! Install Command Implementation
 //!
-//! 基于复用架构实现 check-first 原则的安装流程
+//! Implement install flow based on reuse architecture with check-first principle
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -11,26 +11,26 @@ use crate::core::{
     ErrorReporter, InstallResult,
 };
 
-/// Install 命令
+/// Install command
 #[derive(Args, Debug)]
 #[command(
     about = "Install service dependencies",
-    long_about = "安装服务依赖。可以安装指定的服务包，或者安装 Actr.toml 中配置的所有依赖"
+    long_about = "Install service dependencies. You can install specific service packages, or install all dependencies configured in Actr.toml"
 )]
 pub struct InstallCommand {
-    /// 要安装的服务包列表（例如：actr://user-service@1.0.0/）
+    /// List of service packages to install (e.g., actr://user-service@1.0.0/)
     #[arg(value_name = "PACKAGE")]
     pub packages: Vec<String>,
 
-    /// 强制重新安装
+    /// Force reinstallation
     #[arg(long)]
     pub force: bool,
 
-    /// 强制更新所有依赖
+    /// Force update of all dependencies
     #[arg(long)]
     pub force_update: bool,
 
-    /// 跳过指纹验证
+    /// Skip fingerprint verification
     #[arg(long)]
     pub skip_verification: bool,
 }
@@ -38,7 +38,7 @@ pub struct InstallCommand {
 #[async_trait]
 impl Command for InstallCommand {
     async fn execute(&self, context: &CommandContext) -> Result<CommandResult> {
-        // 🔍 Check-First 原则：先验证项目状态
+        // Check-First principle: validate project state first
         if !self.is_actr_project() {
             return Err(ActrCliError::InvalidProject {
                 message: "Not an Actor-RTC project. Run 'actr init' to initialize.".to_string(),
@@ -46,35 +46,35 @@ impl Command for InstallCommand {
             .into());
         }
 
-        // 确定安装模式
+        // Determine installation mode
         let dependency_specs = if !self.packages.is_empty() {
-            // 模式1: 添加新依赖 (npm install <package>)
-            println!("📦 添加 {} 个新的服务依赖", self.packages.len());
+            // Mode 1: Add new dependency (npm install <package>)
+            println!("📦 Adding {} new service dependencies", self.packages.len());
             self.parse_new_packages()?
         } else {
-            // 模式2: 安装配置中的依赖 (npm install)
+            // Mode 2: Install dependencies in config (npm install)
             if self.force_update {
-                println!("📦 强制更新配置中的所有服务依赖");
+                println!("📦 Force updating all service dependencies in configuration");
             } else {
-                println!("📦 安装配置中的服务依赖");
+                println!("📦 Installing service dependencies in configuration");
             }
             self.load_dependencies_from_config(context).await?
         };
 
         if dependency_specs.is_empty() {
-            println!("ℹ️ 没有需要安装的依赖");
+            println!("ℹ️ No dependencies to install");
             return Ok(CommandResult::Success(
                 "No dependencies to install".to_string(),
             ));
         }
 
-        // 获取安装管道（自动包含 ValidationPipeline）
+        // Get install pipeline (automatically includes ValidationPipeline)
         let install_pipeline = {
             let mut container = context.container.lock().unwrap();
             container.get_install_pipeline()?
         };
 
-        // 🚀 执行 check-first 安装流程
+        // Execute check-first install flow
         match install_pipeline
             .install_dependencies(&dependency_specs)
             .await
@@ -84,7 +84,7 @@ impl Command for InstallCommand {
                 Ok(CommandResult::Install(install_result))
             }
             Err(e) => {
-                // 友好的错误显示
+                // User-friendly error display
                 let cli_error = ActrCliError::InstallFailed {
                     reason: e.to_string(),
                 };
@@ -95,7 +95,7 @@ impl Command for InstallCommand {
     }
 
     fn required_components(&self) -> Vec<ComponentType> {
-        // Install 命令需要完整的安装管道组件
+        // Install command needs complete install pipeline components
         vec![
             ComponentType::ConfigManager,
             ComponentType::DependencyResolver,
@@ -112,7 +112,7 @@ impl Command for InstallCommand {
     }
 
     fn description(&self) -> &str {
-        "npm风格的服务级依赖管理 (check-first 架构)"
+        "npm-style service-level dependency management (check-first architecture)"
     }
 }
 
@@ -131,7 +131,7 @@ impl InstallCommand {
         }
     }
 
-    // 从 clap Args 创建
+    // Create from clap Args
     pub fn from_args(args: &InstallCommand) -> Self {
         InstallCommand {
             packages: args.packages.clone(),
@@ -141,12 +141,12 @@ impl InstallCommand {
         }
     }
 
-    /// 检查是否在 Actor-RTC 项目中
+    /// Check if in Actor-RTC project
     fn is_actr_project(&self) -> bool {
         std::path::Path::new("Actr.toml").exists()
     }
 
-    /// 解析新包规范
+    /// Parse new package specs
     fn parse_new_packages(&self) -> Result<Vec<DependencySpec>> {
         let mut specs = Vec::new();
 
@@ -158,23 +158,23 @@ impl InstallCommand {
         Ok(specs)
     }
 
-    /// 解析单个包规范
+    /// Parse single package spec
     fn parse_package_spec(&self, package_spec: &str) -> Result<DependencySpec> {
         if package_spec.starts_with("actr://") {
-            // 直接 actr:// URI
+            // Direct actr:// URI
             self.parse_actr_uri(package_spec)
         } else if package_spec.contains('@') {
-            // service-name@version 格式
+            // service-name@version format
             self.parse_versioned_spec(package_spec)
         } else {
-            // 简单服务名
+            // Simple service name
             self.parse_simple_spec(package_spec)
         }
     }
 
-    /// 解析 actr:// URI
+    /// Parse actr:// URI
     fn parse_actr_uri(&self, uri: &str) -> Result<DependencySpec> {
-        // 简化的URI解析，实际实现应该更严格
+        // Simplified URI parsing, actual implementation should be more strict
         if !uri.starts_with("actr://") {
             return Err(anyhow::anyhow!("Invalid actr:// URI: {uri}"));
         }
@@ -186,7 +186,7 @@ impl InstallCommand {
             uri_part.to_string()
         };
 
-        // 提取查询参数（简化版本）
+        // Extract query parameters (simplified version)
         let (version, fingerprint) = if uri.contains('?') {
             self.parse_query_params(uri)?
         } else {
@@ -201,7 +201,7 @@ impl InstallCommand {
         })
     }
 
-    /// 解析查询参数
+    /// Parse query parameters
     fn parse_query_params(&self, uri: &str) -> Result<(Option<String>, Option<String>)> {
         if let Some(query_start) = uri.find('?') {
             let query = &uri[query_start + 1..];
@@ -213,7 +213,7 @@ impl InstallCommand {
                     match key {
                         "version" => version = Some(value.to_string()),
                         "fingerprint" => fingerprint = Some(value.to_string()),
-                        _ => {} // 忽略未知参数
+                        _ => {} // Ignore unknown parameters
                     }
                 }
             }
@@ -224,7 +224,7 @@ impl InstallCommand {
         }
     }
 
-    /// 解析版本化规范 (service@version)
+    /// Parse versioned spec (service@version)
     fn parse_versioned_spec(&self, spec: &str) -> Result<DependencySpec> {
         let parts: Vec<&str> = spec.split('@').collect();
         if parts.len() != 2 {
@@ -245,7 +245,7 @@ impl InstallCommand {
         })
     }
 
-    /// 解析简单规范 (service-name)
+    /// Parse simple spec (service-name)
     fn parse_simple_spec(&self, spec: &str) -> Result<DependencySpec> {
         let service_name = spec.to_string();
         let uri = format!("actr://{service_name}/");
@@ -258,7 +258,7 @@ impl InstallCommand {
         })
     }
 
-    /// 从配置文件加载依赖
+    /// Load dependencies from config file
     async fn load_dependencies_from_config(
         &self,
         context: &CommandContext,
@@ -305,31 +305,34 @@ impl InstallCommand {
         Ok(specs)
     }
 
-    /// 显示安装成功信息
+    /// Display install success information
     fn display_install_success(&self, result: &InstallResult) {
         println!();
-        println!("✅ 安装成功！");
-        println!("   📦 安装的依赖: {}", result.installed_dependencies.len());
-        println!("   🗂️  缓存更新: {}", result.cache_updates);
+        println!("✅ Installation successful!");
+        println!(
+            "   📦 Installed dependencies: {}",
+            result.installed_dependencies.len()
+        );
+        println!("   🗂️  Cache updates: {}", result.cache_updates);
 
         if result.updated_config {
-            println!("   📝 已更新配置文件");
+            println!("   📝 Configuration file updated");
         }
 
         if result.updated_lock_file {
-            println!("   🔒 已更新锁文件");
+            println!("   🔒 Lock file updated");
         }
 
         if !result.warnings.is_empty() {
             println!();
-            println!("⚠️ 警告:");
+            println!("⚠️  Warnings:");
             for warning in &result.warnings {
                 println!("   • {warning}");
             }
         }
 
         println!();
-        println!("💡 建议: 运行 'actr gen' 生成最新的代码");
+        println!("💡 Tip: Run 'actr gen' to generate the latest code");
     }
 }
 

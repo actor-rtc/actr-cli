@@ -11,6 +11,10 @@ use clap::Args;
 use tracing::{debug, error, info};
 
 #[derive(Args)]
+#[command(
+    about = "Validate project dependencies",
+    long_about = "Validate that Actor-RTC services are reachable and available in the current network environment"
+)]
 pub struct CheckCommand {
     /// Actor-RTC service URIs to check (e.g., actr://user-service/, actr://order-service/)
     /// If not provided, checks all actr:// service URIs from the configuration file

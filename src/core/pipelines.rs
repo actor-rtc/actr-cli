@@ -34,7 +34,7 @@ impl InstallResult {
 
     pub fn summary(&self) -> String {
         format!(
-            "安装了 {} 个依赖，更新了 {} 个缓存项",
+            "Installed {} dependencies, updated {} cache entries",
             self.installed_dependencies.len(),
             self.cache_updates
         )
@@ -413,11 +413,11 @@ impl InstallPipeline {
         Ok(result)
     }
 
-    /// 更新锁文件
+    /// Update lock file
     async fn update_lock_file(&self, dependencies: &[ResolvedDependency]) -> Result<()> {
-        // TODO: 实现锁文件更新逻辑
-        // 这里应该读取现有的锁文件，合并新的依赖信息，然后写回
-        println!("更新锁文件: {} 个依赖", dependencies.len());
+        // TODO: Implement lock file update logic
+        // Should read existing lock file, merge new dependency info, then write back
+        println!("Updating lock file: {} dependencies", dependencies.len());
         Ok(())
     }
 }
@@ -472,7 +472,7 @@ impl GenerationPipeline {
             .await?;
 
         if !validation.is_valid {
-            return Err(anyhow::anyhow!("Proto文件语法验证失败"));
+            return Err(anyhow::anyhow!("Proto file syntax validation failed"));
         }
 
         // 5. 执行代码生成
@@ -521,7 +521,10 @@ impl GenerationPipeline {
                 let output = std::process::Command::new("rustfmt").arg(file).output()?;
 
                 if !output.status.success() {
-                    eprintln!("rustfmt 警告: {}", String::from_utf8_lossy(&output.stderr));
+                    eprintln!(
+                        "rustfmt warning: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
                 }
             }
         }

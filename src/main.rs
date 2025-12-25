@@ -22,7 +22,11 @@ use actr_cli::commands::{
 /// ACTR-CLI - Actor-RTC Command Line Tool
 #[derive(Parser)]
 #[command(name = "actr")]
-#[command(about = "Actor-RTC Command Line Tool", long_about = None, version)]
+#[command(
+    about = "Actor-RTC Command Line Tool",
+    long_about = "Actor-RTC Command Line Tool - A unified CLI tool built on reuse architecture with 8 core components and 3 operation pipelines",
+    version
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

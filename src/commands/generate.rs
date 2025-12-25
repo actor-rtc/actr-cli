@@ -1,9 +1,9 @@
-//! # 代码生成命令
+//! # Code Generation Command
 //!
-//! 从 proto 文件生成 Rust Actor 代码，包括：
-//! 1. protobuf 消息类型
-//! 2. Actor 基础设施代码
-//! 3. 用户业务逻辑框架（带 TODO 注释）
+//! Generate Rust Actor code from proto files, including:
+//! 1. Protobuf message types
+//! 2. Actor infrastructure code
+//! 3. User business logic scaffolds (with TODO comments)
 
 use crate::commands::Command;
 use crate::commands::SupportedLanguage;
@@ -20,14 +20,14 @@ use tracing::{debug, info, warn};
 #[derive(Args, Debug, Clone)]
 #[command(
     about = "Generate code from proto files",
-    long_about = "从 proto 文件生成多种语言的 Actor 代码，包括 protobuf 消息类型、Actor 基础设施代码和用户业务逻辑框架"
+    long_about = "Generate Actor code in multiple languages from proto files, including protobuf message types, Actor infrastructure code, and user business logic scaffolds"
 )]
 pub struct GenCommand {
-    /// 输入的 proto 文件或目录
+    /// Input proto file or directory
     #[arg(short, long, default_value = "proto")]
     pub input: PathBuf,
 
-    /// 输出目录
+    /// Output directory
     #[arg(short, long, default_value = "src/generated")]
     pub output: PathBuf,
 
@@ -39,7 +39,7 @@ pub struct GenCommand {
     #[arg(long = "no-scaffold")]
     pub no_scaffold: bool,
 
-    /// 是否覆盖已存在的用户代码文件
+    /// Whether to overwrite existing user code files
     #[arg(long)]
     pub overwrite_user_code: bool,
 
@@ -47,7 +47,7 @@ pub struct GenCommand {
     #[arg(long = "no-format")]
     pub no_format: bool,
 
-    /// 调试模式：保留中间生成文件
+    /// Debug mode: keep intermediate generated files
     #[arg(long)]
     pub debug: bool,
 
@@ -78,23 +78,23 @@ impl Command for GenCommand {
             return Ok(());
         }
 
-        // 5. 生成基础设施代码
+        // Step 5: Generate infrastructure code
         self.generate_infrastructure_code(&proto_files).await?;
 
-        // 6. 生成用户代码框架
+        // Step 6: Generate user code scaffold
         if self.should_generate_scaffold() {
             self.generate_user_code_scaffold(&proto_files).await?;
         }
 
-        // 7. 格式化代码
+        // Step 7: Format code
         if self.should_format() {
             self.format_generated_code().await?;
         }
 
-        // 8. 验证生成的代码
+        // Step 8: Validate generated code
         self.validate_generated_code().await?;
 
-        info!("✅ 代码生成完成！");
+        info!("✅ Code generation completed!");
         // Set all generated files to read-only only after generation, formatting, and validation are complete, to not interfere with rustfmt or other steps.
         self.set_generated_files_readonly()?;
         self.print_next_steps();
@@ -105,18 +105,18 @@ impl Command for GenCommand {
 
 impl GenCommand {
     fn preprocess(&self) -> Result<Vec<PathBuf>> {
-        // 1. 验证输入
+        // Step 1: Validate inputs
         self.validate_inputs()?;
 
-        // 2. 清理旧的生成产物（可选）
+        // Step 2: Clean old generation outputs (optional)
         self.clean_generated_outputs()?;
 
-        // 3. 准备输出目录
+        // Step 3: Prepare output directories
         self.prepare_output_dirs()?;
 
-        // 4. 发现 proto 文件
+        // Step 4: Discover proto files
         let proto_files = self.discover_proto_files()?;
-        info!("📁 发现 {} 个 proto 文件", proto_files.len());
+        info!("📁 Found {} proto files", proto_files.len());
 
         Ok(proto_files)
     }
@@ -143,11 +143,12 @@ impl GenCommand {
             return Ok(());
         }
 
-        info!("🧹 清理旧的生成结果: {:?}", self.output);
+        info!("🧹 Cleaning old generation results: {:?}", self.output);
 
         self.make_writable_recursive(&self.output)?;
-        fs::remove_dir_all(&self.output)
-            .map_err(|e| ActrCliError::config_error(format!("删除生成目录失败: {e}")))?;
+        fs::remove_dir_all(&self.output).map_err(|e| {
+            ActrCliError::config_error(format!("Failed to delete generation directory: {e}"))
+        })?;
 
         Ok(())
     }
@@ -158,8 +159,9 @@ impl GenCommand {
         use std::fs;
 
         if path.is_file() {
-            let metadata = fs::metadata(path)
-                .map_err(|e| ActrCliError::config_error(format!("读取文件元数据失败: {e}")))?;
+            let metadata = fs::metadata(path).map_err(|e| {
+                ActrCliError::config_error(format!("Failed to read file metadata: {e}"))
+            })?;
             let mut permissions = metadata.permissions();
 
             #[cfg(unix)]
@@ -174,11 +176,12 @@ impl GenCommand {
                 permissions.set_readonly(false);
             }
 
-            fs::set_permissions(path, permissions)
-                .map_err(|e| ActrCliError::config_error(format!("重置文件权限失败: {e}")))?;
+            fs::set_permissions(path, permissions).map_err(|e| {
+                ActrCliError::config_error(format!("Failed to reset file permissions: {e}"))
+            })?;
         } else if path.is_dir() {
             for entry in fs::read_dir(path)
-                .map_err(|e| ActrCliError::config_error(format!("读取目录失败: {e}")))?
+                .map_err(|e| ActrCliError::config_error(format!("Failed to read directory: {e}")))?
             {
                 let entry = entry.map_err(|e| ActrCliError::config_error(e.to_string()))?;
                 self.make_writable_recursive(&entry.path())?;
@@ -213,13 +216,13 @@ impl GenCommand {
     fn validate_inputs(&self) -> Result<()> {
         if !self.input.exists() {
             return Err(ActrCliError::config_error(format!(
-                "输入路径不存在: {:?}",
+                "Input path does not exist: {:?}",
                 self.input
             )));
         }
 
         if self.input.is_file() && self.input.extension().unwrap_or_default() != "proto" {
-            warn!("输入文件不是 .proto 文件: {:?}", self.input);
+            warn!("Input file is not a .proto file: {:?}", self.input);
         }
 
         Ok(())
@@ -227,13 +230,15 @@ impl GenCommand {
 
     /// 准备输出目录
     fn prepare_output_dirs(&self) -> Result<()> {
-        std::fs::create_dir_all(&self.output)
-            .map_err(|e| ActrCliError::config_error(format!("创建输出目录失败: {e}")))?;
+        std::fs::create_dir_all(&self.output).map_err(|e| {
+            ActrCliError::config_error(format!("Failed to create output directory: {e}"))
+        })?;
 
         if self.should_generate_scaffold() {
             let user_code_dir = self.output.join("../");
-            std::fs::create_dir_all(&user_code_dir)
-                .map_err(|e| ActrCliError::config_error(format!("创建用户代码目录失败: {e}")))?;
+            std::fs::create_dir_all(&user_code_dir).map_err(|e| {
+                ActrCliError::config_error(format!("Failed to create user code directory: {e}"))
+            })?;
         }
 
         Ok(())
@@ -247,9 +252,9 @@ impl GenCommand {
             proto_files.push(self.input.clone());
         } else {
             // 遍历目录查找 .proto 文件
-            for entry in std::fs::read_dir(&self.input)
-                .map_err(|e| ActrCliError::config_error(format!("读取输入目录失败: {e}")))?
-            {
+            for entry in std::fs::read_dir(&self.input).map_err(|e| {
+                ActrCliError::config_error(format!("Failed to read input directory: {e}"))
+            })? {
                 let entry = entry.map_err(|e| ActrCliError::config_error(e.to_string()))?;
                 let path = entry.path();
 
@@ -260,7 +265,7 @@ impl GenCommand {
         }
 
         if proto_files.is_empty() {
-            return Err(ActrCliError::config_error("未找到 proto 文件"));
+            return Err(ActrCliError::config_error("No proto files found"));
         }
 
         Ok(proto_files)
@@ -427,7 +432,7 @@ impl GenCommand {
 
     /// 生成基础设施代码
     async fn generate_infrastructure_code(&self, proto_files: &[PathBuf]) -> Result<()> {
-        info!("🔧 生成基础设施代码...");
+        info!("🔧 Generating infrastructure code...");
 
         // 确保 protoc 插件可用
         let plugin_path = self.ensure_protoc_plugin()?;
@@ -437,7 +442,7 @@ impl GenCommand {
         debug!("Using manufacturer from Actr.toml: {}", manufacturer);
 
         for proto_file in proto_files {
-            debug!("处理 proto 文件: {:?}", proto_file);
+            debug!("Processing proto file: {:?}", proto_file);
 
             // 第一步：使用 prost 生成基础 protobuf 消息类型
             let mut cmd = StdCommand::new("protoc");
@@ -446,15 +451,15 @@ impl GenCommand {
                 .arg(format!("--prost_out={}", self.output.display()))
                 .arg(proto_file);
 
-            debug!("执行 protoc (prost): {:?}", cmd);
+            debug!("Executing protoc (prost): {:?}", cmd);
             let output = cmd.output().map_err(|e| {
-                ActrCliError::command_error(format!("执行 protoc (prost) 失败: {e}"))
+                ActrCliError::command_error(format!("Failed to execute protoc (prost): {e}"))
             })?;
 
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 return Err(ActrCliError::command_error(format!(
-                    "protoc (prost) 执行失败: {stderr}"
+                    "protoc (prost) execution failed: {stderr}"
                 )));
             }
 
@@ -469,28 +474,30 @@ impl GenCommand {
                 .arg(format!("--actrframework_out={}", self.output.display()))
                 .arg(proto_file);
 
-            debug!("执行 protoc (actrframework): {:?}", cmd);
+            debug!("Executing protoc (actrframework): {:?}", cmd);
             let output = cmd.output().map_err(|e| {
-                ActrCliError::command_error(format!("执行 protoc (actrframework) 失败: {e}"))
+                ActrCliError::command_error(format!(
+                    "Failed to execute protoc (actrframework): {e}"
+                ))
             })?;
 
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 return Err(ActrCliError::command_error(format!(
-                    "protoc (actrframework) 执行失败: {stderr}"
+                    "protoc (actrframework) execution failed: {stderr}"
                 )));
             }
 
             let stdout = String::from_utf8_lossy(&output.stdout);
             if !stdout.is_empty() {
-                debug!("protoc 输出: {}", stdout);
+                debug!("protoc output: {}", stdout);
             }
         }
 
         // 生成 mod.rs
         self.generate_mod_rs(proto_files).await?;
 
-        info!("✅ 基础设施代码生成完成");
+        info!("✅ Infrastructure code generation completed");
         Ok(())
     }
 
@@ -503,9 +510,9 @@ impl GenCommand {
         let mut service_modules = Vec::new();
 
         use std::fs;
-        for entry in fs::read_dir(&self.output)
-            .map_err(|e| ActrCliError::config_error(format!("读取输出目录失败: {e}")))?
-        {
+        for entry in fs::read_dir(&self.output).map_err(|e| {
+            ActrCliError::config_error(format!("Failed to read output directory: {e}"))
+        })? {
             let entry = entry.map_err(|e| ActrCliError::config_error(e.to_string()))?;
             let path = entry.path();
 
@@ -531,30 +538,30 @@ impl GenCommand {
         service_modules.sort();
 
         let mod_content = format!(
-            r#"//! 自动生成的代码模块
+            r#"//! Automatically generated code module
 //!
-//! 此模块由 `actr gen` 命令自动生成，包括：
-//! - protobuf 消息类型定义
-//! - Actor 框架代码（路由器、trait）
+//! This module is automatically generated by the `actr gen` command, including:
+//! - protobuf message type definitions
+//! - Actor framework code (router, traits)
 //!
-//! ⚠️  请勿手动修改此目录中的文件
+//! ⚠️ Do not manually modify files in this directory
 
-// Protobuf 消息类型（由 prost 生成）
+// Protobuf message types (generated by prost)
 {}
 
-// Actor 框架代码（由 protoc-gen-actrframework 生成）
+// Actor framework code (generated by protoc-gen-actrframework)
 {}
 
-// 常用类型会在各自的模块中定义，请按需导入
+// Common types are defined in their respective modules, please import as needed
 "#,
             proto_modules.join("\n"),
             service_modules.join("\n"),
         );
 
         std::fs::write(&mod_path, mod_content)
-            .map_err(|e| ActrCliError::config_error(format!("写入 mod.rs 失败: {e}")))?;
+            .map_err(|e| ActrCliError::config_error(format!("Failed to write mod.rs: {e}")))?;
 
-        debug!("生成 mod.rs: {:?}", mod_path);
+        debug!("Generated mod.rs: {:?}", mod_path);
         Ok(())
     }
 
@@ -562,16 +569,17 @@ impl GenCommand {
     fn set_generated_files_readonly(&self) -> Result<()> {
         use std::fs;
 
-        for entry in fs::read_dir(&self.output)
-            .map_err(|e| ActrCliError::config_error(format!("读取输出目录失败: {e}")))?
-        {
+        for entry in fs::read_dir(&self.output).map_err(|e| {
+            ActrCliError::config_error(format!("Failed to read output directory: {e}"))
+        })? {
             let entry = entry.map_err(|e| ActrCliError::config_error(e.to_string()))?;
             let path = entry.path();
 
             if path.is_file() && path.extension().unwrap_or_default() == "rs" {
                 // 获取当前权限
-                let metadata = fs::metadata(&path)
-                    .map_err(|e| ActrCliError::config_error(format!("获取文件元数据失败: {e}")))?;
+                let metadata = fs::metadata(&path).map_err(|e| {
+                    ActrCliError::config_error(format!("Failed to get file metadata: {e}"))
+                })?;
                 let mut permissions = metadata.permissions();
 
                 // 设置只读（移除写权限）
@@ -587,34 +595,35 @@ impl GenCommand {
                     permissions.set_readonly(true);
                 }
 
-                fs::set_permissions(&path, permissions)
-                    .map_err(|e| ActrCliError::config_error(format!("设置文件权限失败: {e}")))?;
+                fs::set_permissions(&path, permissions).map_err(|e| {
+                    ActrCliError::config_error(format!("Failed to set file permissions: {e}"))
+                })?;
 
-                debug!("设置只读属性: {:?}", path);
+                debug!("Set read-only attribute: {:?}", path);
             }
         }
 
         Ok(())
     }
 
-    /// 生成用户代码框架
+    /// Generate user code scaffold
     async fn generate_user_code_scaffold(&self, proto_files: &[PathBuf]) -> Result<()> {
-        info!("📝 生成用户代码框架...");
+        info!("📝 Generating user code scaffold...");
 
         for proto_file in proto_files {
             let service_name = proto_file
                 .file_stem()
                 .and_then(|s| s.to_str())
-                .ok_or_else(|| ActrCliError::config_error("无效的 proto 文件名"))?;
+                .ok_or_else(|| ActrCliError::config_error("Invalid proto file name"))?;
 
             self.generate_service_scaffold(service_name).await?;
         }
 
-        info!("✅ 用户代码框架生成完成");
+        info!("✅ User code scaffold generation completed");
         Ok(())
     }
 
-    /// 为特定服务生成用户代码框架
+    /// Generate scaffold for a specific service
     async fn generate_service_scaffold(&self, service_name: &str) -> Result<()> {
         let user_file_path = self
             .output
@@ -622,18 +631,19 @@ impl GenCommand {
             .unwrap_or_else(|| Path::new("src"))
             .join(format!("{}_service.rs", service_name.to_lowercase()));
 
-        // 如果文件已存在且不强制覆盖，跳过
+        // If file exists and overwrite is not forced, skip
         if user_file_path.exists() && !self.overwrite_user_code {
-            info!("⏭️  跳过已存在的用户代码文件: {:?}", user_file_path);
+            info!("⏭️  Skipping existing user code file: {:?}", user_file_path);
             return Ok(());
         }
 
         let scaffold_content = self.generate_scaffold_content(service_name);
 
-        std::fs::write(&user_file_path, scaffold_content)
-            .map_err(|e| ActrCliError::config_error(format!("写入用户代码框架失败: {e}")))?;
+        std::fs::write(&user_file_path, scaffold_content).map_err(|e| {
+            ActrCliError::config_error(format!("Failed to write user code scaffold: {e}"))
+        })?;
 
-        info!("📄 生成用户代码框架: {:?}", user_file_path);
+        info!("📄 Generated user code scaffold: {:?}", user_file_path);
         Ok(())
     }
 
@@ -651,61 +661,61 @@ impl GenCommand {
             .collect::<String>();
 
         let template = format!(
-            r#"//! # {service_name_pascal} 用户业务逻辑实现
+            r#"//! # {service_name_pascal} user business logic implementation
 //!
-//! 这个文件是由 `actr gen` 命令自动生成的用户代码框架。
-//! 请在这里实现您的具体业务逻辑。
+//! This file is a user code scaffold automatically generated by the `actr gen` command.
+//! Please implement your specific business logic here.
 
 use crate::generated::{{{service_name_pascal}Handler, {service_name_pascal}Actor}};
 // 只导入必要的类型，避免拉入不需要的依赖如 sqlite
 // use actr_framework::prelude::*;
 use std::sync::Arc;
 
-/// {service_name_pascal} 服务的具体实现
+/// Specific implementation of the {service_name_pascal} service
 /// 
-/// TODO: 添加您需要的状态字段，例如：
-/// - 数据库连接池
-/// - 配置信息
-/// - 缓存客户端
-/// - 日志记录器等
+/// TODO: Add state fields you need, for example:
+/// - Database connection pool
+/// - Configuration information
+/// - Cache client
+/// - Logger, etc.
 pub struct My{service_name_pascal}Service {{
-    // TODO: 添加您的服务状态字段
-    // 例如：
+    // TODO: Add your service state fields
+    // For example:
     // pub db_pool: Arc<DatabasePool>,
     // pub config: Arc<ServiceConfig>,
     // pub metrics: Arc<Metrics>,
 }}
 
 impl My{service_name_pascal}Service {{
-    /// 创建新的服务实例
+    /// Create a new service instance
     /// 
-    /// TODO: 根据您的需要修改构造函数参数
-    pub fn new(/* TODO: 添加必要的依赖 */) -> Self {{
+    /// TODO: Modify constructor parameters as needed
+    pub fn new(/* TODO: Add necessary dependencies */) -> Self {{
         Self {{
-            // TODO: 初始化您的字段
+            // TODO: Initialize your fields
         }}
     }}
     
-    /// 使用默认配置创建服务实例（用于测试）
+    /// Create a service instance with default configuration (for testing)
     pub fn default_for_testing() -> Self {{
         Self {{
-            // TODO: 提供测试用的默认值
+            // TODO: Provide default values for testing
         }}
     }}
 }}
 
-// TODO: 实现 {service_name_pascal}Handler trait 的所有方法
-// 注意：impl_user_code_scaffold! 宏已经为您生成了基础框架，
-// 您需要将其替换为真实的业务逻辑实现。
+// TODO: Implement all methods of the {service_name_pascal}Handler trait
+// Note: The impl_user_code_scaffold! macro has generated a basic scaffold for you,
+// you need to replace it with real business logic implementation.
 //
-// 示例：
+// Example:
 // #[async_trait]
 // impl {service_name_pascal}Handler for My{service_name_pascal}Service {{
 //     async fn method_name(&self, req: RequestType) -> ActorResult<ResponseType> {{
-//         // 1. 验证输入
-//         // 2. 执行业务逻辑
-//         // 3. 返回结果
-//         todo!("实现您的业务逻辑")
+//         // 1. Validate input
+//         // 2. Execute business logic
+//         // 3. Return result
+//         todo!("Implement your business logic")
 //     }}
 // }}
 
@@ -716,31 +726,31 @@ mod tests {{
     #[tokio::test]
     async fn test_service_creation() {{
         let _service = My{service_name_pascal}Service::default_for_testing();
-        // TODO: 添加您的测试
+        // TODO: Add your tests
     }}
     
-    // TODO: 添加更多测试用例
+    // TODO: Add more test cases
 }}
 
 /*
-📚 使用指南
+📚 User Guide
 
-## 🚀 快速开始
+## 🚀 Quick Start
 
-1. **实现业务逻辑**：
-   在 `My{service_name_pascal}Service` 中实现 `{service_name_pascal}Handler` trait 的所有方法
+1. **Implement business logic**:
+   Implement all methods of the `{service_name_pascal}Handler` trait in `My{service_name_pascal}Service`
 
-2. **添加依赖**：
-   在 `Cargo.toml` 中添加您需要的依赖，例如数据库客户端、HTTP 客户端等
+2. **Add dependencies**:
+   Add dependencies you need in `Cargo.toml`, such as database clients, HTTP clients, etc.
 
-3. **配置服务**：
-   修改 `new()` 构造函数，注入必要的依赖
+3. **Configure service**:
+   Modify the `new()` constructor to inject necessary dependencies
 
-4. **启动服务**：
+4. **Start service**:
    ```rust
    #[tokio::main]
    async fn main() -> ActorResult<()> {{
-       let service = My{service_name_pascal}Service::new(/* 依赖 */);
+       let service = My{service_name_pascal}Service::new(/* dependencies */);
        
        ActorSystem::new()
            .attach(service)
@@ -749,21 +759,21 @@ mod tests {{
    }}
    ```
 
-## 🔧 开发提示
+## 🔧 Development Tips
 
-- 使用 `tracing` crate 进行日志记录
-- 实现错误处理和重试逻辑
-- 添加单元测试和集成测试
-- 考虑使用配置文件管理环境变量
-- 实现健康检查和指标收集
+- Use `tracing` crate for logging
+- Implement error handling and retry logic
+- Add unit and integration tests
+- Consider using configuration files for environment variables
+- Implement health checks and metrics collection
 
-## 📖 更多资源
+## 📖 More Resources
 
-- Actor-RTC 文档: [链接]
-- API 参考: [链接]
-- 示例项目: [链接]
+- Actor-RTC Documentation: [Link]
+- API Reference: [Link]
+- Example Projects: [Link]
 */
-"# // 示例代码中的 Service
+"# // Service in example code
         );
 
         template
@@ -771,7 +781,7 @@ mod tests {{
 
     /// 格式化生成的代码
     async fn format_generated_code(&self) -> Result<()> {
-        info!("🎨 格式化生成的代码...");
+        info!("🎨 Formatting generated code...");
 
         let mut cmd = StdCommand::new("rustfmt");
         cmd.arg("--edition")
@@ -780,9 +790,9 @@ mod tests {{
             .arg("max_width=100");
 
         // 格式化生成目录中的所有 .rs 文件
-        for entry in std::fs::read_dir(&self.output)
-            .map_err(|e| ActrCliError::config_error(format!("读取输出目录失败: {e}")))?
-        {
+        for entry in std::fs::read_dir(&self.output).map_err(|e| {
+            ActrCliError::config_error(format!("Failed to read output directory: {e}"))
+        })? {
             let entry = entry.map_err(|e| ActrCliError::config_error(e.to_string()))?;
             let path = entry.path();
 
@@ -793,13 +803,13 @@ mod tests {{
 
         let output = cmd
             .output()
-            .map_err(|e| ActrCliError::command_error(format!("执行 rustfmt 失败: {e}")))?;
+            .map_err(|e| ActrCliError::command_error(format!("Failed to execute rustfmt: {e}")))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            warn!("rustfmt 执行警告: {}", stderr);
+            warn!("rustfmt execution warning: {}", stderr);
         } else {
-            info!("✅ 代码格式化完成");
+            info!("✅ Code formatting completed");
         }
 
         Ok(())
@@ -807,7 +817,7 @@ mod tests {{
 
     /// 验证生成的代码
     async fn validate_generated_code(&self) -> Result<()> {
-        info!("🔍 验证生成的代码...");
+        info!("🔍 Validating generated code...");
 
         // 查找项目根目录（包含 Cargo.toml 的目录）
         let project_root = self.find_project_root()?;
@@ -815,16 +825,19 @@ mod tests {{
         let mut cmd = StdCommand::new("cargo");
         cmd.arg("check").arg("--quiet").current_dir(&project_root);
 
-        let output = cmd
-            .output()
-            .map_err(|e| ActrCliError::command_error(format!("执行 cargo check 失败: {e}")))?;
+        let output = cmd.output().map_err(|e| {
+            ActrCliError::command_error(format!("Failed to execute cargo check: {e}"))
+        })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            warn!("生成的代码存在编译警告或错误:\n{}", stderr);
-            info!("💡 这通常是正常的，因为用户代码框架包含 TODO 标记");
+            warn!(
+                "Generated code has compilation warnings or errors:\n{}",
+                stderr
+            );
+            info!("💡 This is usually normal because the user code scaffold contains TODO markers");
         } else {
-            info!("✅ 代码验证通过");
+            info!("✅ Code validation passed");
         }
 
         Ok(())
@@ -851,20 +864,22 @@ mod tests {{
 
     /// 打印后续步骤提示
     fn print_next_steps(&self) {
-        println!("\n🎉 代码生成完成！");
-        println!("\n📋 后续步骤：");
-        println!("1. 📖 查看生成的代码: {:?}", self.output);
+        println!("\n🎉 Code generation completed!");
+        println!("\n📋 Next steps:");
+        println!("1. 📖 View generated code: {:?}", self.output);
         if self.should_generate_scaffold() {
-            println!("2. ✏️  实现业务逻辑: 在 src/ 目录下的 *_service.rs 文件中");
-            println!("3. 🔧 添加依赖: 在 Cargo.toml 中添加需要的依赖包");
-            println!("4. 🏗️  编译项目: cargo build");
-            println!("5. 🧪 运行测试: cargo test");
-            println!("6. 🚀 启动服务: cargo run");
+            println!(
+                "2. ✏️  Implement business logic: in the *_service.rs files in the src/ directory"
+            );
+            println!("3. 🔧 Add dependencies: add required packages in Cargo.toml");
+            println!("4. 🏗️  Build project: cargo build");
+            println!("5. 🧪 Run tests: cargo test");
+            println!("6. 🚀 Start service: cargo run");
         } else {
-            println!("2. 🏗️  编译项目: cargo build");
-            println!("3. 🧪 运行测试: cargo test");
-            println!("4. 🚀 启动服务: cargo run");
+            println!("2. 🏗️  Build project: cargo build");
+            println!("3. 🧪 Run tests: cargo test");
+            println!("4. 🚀 Start service: cargo run");
         }
-        println!("\n💡 提示: 查看生成的用户代码文件中的详细使用指南");
+        println!("\n💡 Tip: Check the detailed user guide in the generated user code files");
     }
 }
