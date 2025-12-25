@@ -3,12 +3,13 @@ mod python;
 mod swift;
 mod traits;
 
+pub use crate::commands::SupportedLanguage;
 use crate::error::Result;
 use kotlin::KotlinGenerator;
 use python::PythonGenerator;
 use swift::SwiftGenerator;
 use tracing::info;
-pub use traits::{GenContext, LanguageGenerator, SupportedLanguage};
+pub use traits::{GenContext, LanguageGenerator};
 
 pub struct GeneratorFactory;
 

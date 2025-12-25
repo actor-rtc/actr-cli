@@ -9,16 +9,27 @@ pub mod doc;
 pub mod fingerprint;
 pub mod generate;
 pub mod init;
+pub mod initialize;
 pub mod install;
 pub mod run;
 
 use crate::error::Result;
 use async_trait::async_trait;
+use clap::ValueEnum;
 
 // Legacy command trait for backward compatibility
 #[async_trait]
 pub trait Command {
     async fn execute(&self) -> Result<()>;
+}
+
+/// Supported languages for CLI commands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, serde::Serialize, serde::Deserialize)]
+pub enum SupportedLanguage {
+    Rust,
+    Python,
+    Swift,
+    Kotlin,
 }
 
 // Re-export new architecture commands

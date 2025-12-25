@@ -6,7 +6,8 @@
 //! 3. 用户业务逻辑框架（带 TODO 注释）
 
 use crate::commands::Command;
-use crate::commands::codegen::{GenContext, SupportedLanguage, execute_codegen};
+use crate::commands::SupportedLanguage;
+use crate::commands::codegen::{GenContext, execute_codegen};
 use crate::error::{ActrCliError, Result};
 // 只导入必要的类型，避免拉入不需要的依赖如 sqlite
 // use actr_framework::prelude::*;

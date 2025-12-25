@@ -1,16 +1,6 @@
 use crate::error::Result;
 use async_trait::async_trait;
-use clap::ValueEnum;
 use std::path::PathBuf;
-
-/// Supported languages for code generation
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, serde::Serialize, serde::Deserialize)]
-pub enum SupportedLanguage {
-    Rust,
-    Python,
-    Swift,
-    Kotlin,
-}
 
 /// Context for code generation
 #[derive(Debug, Clone)]

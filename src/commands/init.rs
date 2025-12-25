@@ -1,6 +1,7 @@
 //! Project initialization command
 
-use crate::commands::Command;
+use crate::commands::initialize::{self, InitContext};
+use crate::commands::{Command, SupportedLanguage};
 use crate::error::{ActrCliError, Result};
 use async_trait::async_trait;
 use clap::Args;
@@ -24,6 +25,10 @@ pub struct InitCommand {
     /// Signaling server URL
     #[arg(long)]
     pub signaling: Option<String>,
+
+    /// Target language for project initialization
+    #[arg(short, long, default_value = "rust")]
+    pub language: SupportedLanguage,
 }
 
 #[async_trait]
@@ -61,6 +66,22 @@ impl Command for InitCommand {
         // Create project directory if needed
         if project_dir != Path::new(".") {
             std::fs::create_dir_all(&project_dir)?;
+        }
+
+        if self.language != SupportedLanguage::Rust {
+            let context = InitContext {
+                project_dir: project_dir.clone(),
+                project_name: project_name.clone(),
+                signaling_url: signaling_url.clone(),
+                template: self.template.clone(),
+                is_current_dir: project_dir == Path::new("."),
+            };
+            initialize::execute_initialize(self.language, &context)?;
+            info!(
+                "✅ Successfully created Actor-RTC project '{}'",
+                project_name
+            );
+            return Ok(());
         }
 
         // Generate project structure

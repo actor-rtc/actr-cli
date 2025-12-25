@@ -47,6 +47,9 @@ pub enum ActrCliError {
     #[error("Template rendering failed: {0}")]
     Template(#[from] handlebars::RenderError),
 
+    #[error("Unsupported feature: {0}")]
+    Unsupported(String),
+
     // === 命令执行错误 ===
     #[error("Command execution failed: {0}")]
     Command(String),
@@ -110,6 +113,7 @@ impl ActrCliError {
             Self::Dependency(_) => Some("💡 Try 'actr install --force' to refresh dependencies"),
             Self::Build(_) => Some("💡 Check proto files and dependencies"),
             Self::Network(_) => Some("💡 Check your network connection and proxy settings"),
+            Self::Unsupported(_) => Some("💡 This feature is not implemented yet"),
             _ => None,
         }
     }
