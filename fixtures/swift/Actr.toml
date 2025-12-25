@@ -1,0 +1,23 @@
+edition = 1
+exports = []
+
+[package]
+name = "{{PROJECT_NAME}}"
+manufacturer = "acme"
+type = "{{PROJECT_NAME}}-client"
+description = "An Actor-RTC Swift client"
+authors = []
+
+[dependencies]
+
+[system.signaling]
+url = "{{SIGNALING_URL}}"
+
+[system.deployment]
+realm = 0
+
+[system.discovery]
+visible = true
+
+[scripts]
+dev = "xcodegen generate"

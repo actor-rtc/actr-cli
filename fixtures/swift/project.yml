@@ -1,0 +1,35 @@
+name: {{PROJECT_NAME_PASCAL}}
+options:
+  bundleIdPrefix: io.actr
+
+packages:
+  actr-swift:
+    url: https://github.com/actor-rtc/actr-swift
+    from: 0.1.8
+  SwiftProtobuf:
+    url: https://github.com/apple/swift-protobuf.git
+    from: 1.20.0
+
+targets:
+  {{PROJECT_NAME_PASCAL}}:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: {{PROJECT_NAME_PASCAL}}
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: {{BUNDLE_ID}}
+      INFOPLIST_FILE: {{PROJECT_NAME_PASCAL}}/Info.plist
+      MARKETING_VERSION: 1.0.0
+      CURRENT_PROJECT_VERSION: 1
+      ENABLE_PREVIEWS: YES
+      SWIFT_VERSION: 6.0
+      ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      GENERATE_INFOPLIST_FILE: NO
+      SUPPORTS_MAC_DESIGNED_FOR_IPAD: YES
+
+    dependencies:
+      - package: actr-swift
+        product: Actr
+      - package: SwiftProtobuf
+        product: SwiftProtobuf

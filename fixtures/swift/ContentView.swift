@@ -1,0 +1,107 @@
+import SwiftUI
+
+struct ContentView: View {
+    @StateObject private var actrService = ActrService()
+    @State private var messageText = ""
+    @State private var responseText = ""
+    @State private var isInitialized = false
+
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 16) {
+                Text("{{PROJECT_NAME_PASCAL}}")
+                    .font(.largeTitle.weight(.bold))
+
+                Text("Status: \(actrService.connectionStatus.description)")
+                    .font(.subheadline)
+                    .foregroundColor(statusColor)
+
+                TextField("Enter message", text: $messageText)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(actrService.connectionStatus != .connected)
+
+                Button(action: sendMessage) {
+                    Text("Send")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(actrService.connectionStatus == .connected ? Color.blue : Color.gray)
+                        .foregroundColor(.white)
+                        .cornerRadius(8)
+                }
+                .disabled(
+                    messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                        actrService.connectionStatus != .connected
+                )
+
+                if !responseText.isEmpty {
+                    Text(responseText)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                        .background(Color.gray.opacity(0.15))
+                        .cornerRadius(8)
+                }
+
+                Spacer()
+            }
+            .padding()
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .onAppear {
+            guard !isInitialized else { return }
+            initializeActrService()
+        }
+        .alert(isPresented: .constant(actrService.errorMessage != nil)) {
+            Alert(
+                title: Text("Error"),
+                message: Text(actrService.errorMessage ?? "Unknown error"),
+                dismissButton: .default(Text("OK")) {
+                    actrService.errorMessage = nil
+                }
+            )
+        }
+    }
+
+    private var statusColor: Color {
+        switch actrService.connectionStatus {
+        case .disconnected:
+            return Color.gray
+        case .initializing:
+            return Color.orange
+        case .connected:
+            return Color.green
+        case .error:
+            return Color.red
+        }
+    }
+
+    private func initializeActrService() {
+        Task {
+            do {
+                try await actrService.initialize()
+                isInitialized = true
+            } catch {
+                responseText = "Initialization failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func sendMessage() {
+        let message = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !message.isEmpty else { return }
+        messageText = ""
+        responseText = "Sending..."
+
+        Task {
+            do {
+                let response = try await actrService.sendEcho(message)
+                responseText = response
+            } catch {
+                responseText = "Send failed: \(error.localizedDescription)"
+            }
+        }
+    }
+}
+
+#Preview {
+    ContentView()
+}
