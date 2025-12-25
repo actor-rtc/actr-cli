@@ -3,6 +3,7 @@
 pub mod check;
 // TODO: config command needs rewrite for new Config API
 // pub mod config;
+pub mod codegen;
 pub mod discovery;
 pub mod doc;
 pub mod fingerprint;

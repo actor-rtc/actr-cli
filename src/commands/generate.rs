@@ -6,6 +6,7 @@
 //! 3. 用户业务逻辑框架（带 TODO 注释）
 
 use crate::commands::Command;
+use crate::commands::codegen::{GenContext, SupportedLanguage, execute_codegen};
 use crate::error::{ActrCliError, Result};
 // 只导入必要的类型，避免拉入不需要的依赖如 sqlite
 // use actr_framework::prelude::*;
@@ -18,7 +19,7 @@ use tracing::{debug, info, warn};
 #[derive(Args, Debug, Clone)]
 #[command(
     about = "Generate code from proto files",
-    long_about = "从 proto 文件生成 Rust Actor 代码，包括 protobuf 消息类型、Actor 基础设施代码和用户业务逻辑框架"
+    long_about = "从 proto 文件生成多种语言的 Actor 代码，包括 protobuf 消息类型、Actor 基础设施代码和用户业务逻辑框架"
 )]
 pub struct GenCommand {
     /// 输入的 proto 文件或目录
@@ -41,32 +42,40 @@ pub struct GenCommand {
     #[arg(long)]
     pub overwrite_user_code: bool,
 
-    /// Skip rustfmt formatting
+    /// Skip formatting
     #[arg(long = "no-format")]
     pub no_format: bool,
 
     /// 调试模式：保留中间生成文件
     #[arg(long)]
     pub debug: bool,
+
+    /// Target language for generation
+    #[arg(short, long, default_value = "rust")]
+    pub language: SupportedLanguage,
 }
 
 #[async_trait]
 impl Command for GenCommand {
     async fn execute(&self) -> Result<()> {
-        info!("🚀 开始代码生成...");
+        info!(
+            "🚀 Start code generation (language: {:?})...",
+            self.language
+        );
 
-        // 1. 验证输入
-        self.validate_inputs()?;
-
-        // 2. 清理旧的生成产物（可选）
-        self.clean_generated_outputs()?;
-
-        // 3. 准备输出目录
-        self.prepare_output_dirs()?;
-
-        // 4. 发现 proto 文件
-        let proto_files = self.discover_proto_files()?;
-        info!("📁 发现 {} 个 proto 文件", proto_files.len());
+        let proto_files = self.preprocess()?;
+        if self.language != SupportedLanguage::Rust {
+            let context = GenContext {
+                proto_files,
+                output: self.output.clone(),
+                no_scaffold: self.no_scaffold,
+                overwrite_user_code: self.overwrite_user_code,
+                no_format: self.no_format,
+                debug: self.debug,
+            };
+            execute_codegen(self.language, &context).await?;
+            return Ok(());
+        }
 
         // 5. 生成基础设施代码
         self.generate_infrastructure_code(&proto_files).await?;
@@ -94,6 +103,23 @@ impl Command for GenCommand {
 }
 
 impl GenCommand {
+    fn preprocess(&self) -> Result<Vec<PathBuf>> {
+        // 1. 验证输入
+        self.validate_inputs()?;
+
+        // 2. 清理旧的生成产物（可选）
+        self.clean_generated_outputs()?;
+
+        // 3. 准备输出目录
+        self.prepare_output_dirs()?;
+
+        // 4. 发现 proto 文件
+        let proto_files = self.discover_proto_files()?;
+        info!("📁 发现 {} 个 proto 文件", proto_files.len());
+
+        Ok(proto_files)
+    }
+
     /// Whether user code scaffold should be generated
     fn should_generate_scaffold(&self) -> bool {
         !self.no_scaffold
