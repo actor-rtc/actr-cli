@@ -1,4 +1,4 @@
-use crate::error::Result;
+use crate::{error::Result, template::ProjectTemplateName};
 use std::path::PathBuf;
 
 /// Context for non-Rust project initialization.
@@ -7,7 +7,7 @@ pub struct InitContext {
     pub project_dir: PathBuf,
     pub project_name: String,
     pub signaling_url: String,
-    pub template: Option<String>,
+    pub template: ProjectTemplateName,
     pub is_current_dir: bool,
 }
 

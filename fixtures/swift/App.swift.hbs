@@ -2,8 +2,8 @@ import OSLog
 import SwiftUI
 
 @main
-struct {{APP_STRUCT_NAME}}: App {
-    private let logger = Logger(subsystem: "{{BUNDLE_ID}}", category: "App")
+struct {{PROJECT_NAME_PASCAL}}App: App {
+    private let logger = Logger(subsystem: "io.actr.{{PROJECT_NAME_PASCAL}}", category: "App")
 
     init() {
         logger.notice("{{PROJECT_NAME_PASCAL}} is initializing")

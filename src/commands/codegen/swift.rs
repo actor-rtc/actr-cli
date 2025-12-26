@@ -10,7 +10,7 @@ use tracing::{debug, info};
 
 const ACTR_SERVICE_TEMPLATE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/templates/swift/actr_service.swift.hbs"
+    "/fixtures/swift/ActrService.swift.hbs"
 ));
 
 // Required tools for Swift codegen

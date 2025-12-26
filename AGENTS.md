@@ -1,9 +1,9 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `src/` houses Rust CLI code. `src/main.rs` is the binary entrypoint and `src/lib.rs` contains shared modules. `src/commands/` implements subcommands, `src/core/` holds core logic, and `src/templates/` contains built-in scaffolding.
-- `templates/` stores external template assets used by `actr init`.
-- `tests/` contains integration tests (currently `tests/integration_test.rs`); `fixtures/` holds test inputs.
+- `src/` houses Rust CLI code. `src/main.rs` is the binary entrypoint and `src/lib.rs` contains shared modules. `src/commands/` implements subcommands, `src/core/` holds core logic, and `src/templates/` contains the project template system.
+- `fixtures/` stores template assets (scaffolding) and test inputs.
+- `tests/` contains integration tests (currently `tests/integration_test.rs`).
 - `scripts/` has release helpers; `target/` is Cargo build output.
 
 ## Build, Test, and Development Commands

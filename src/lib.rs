@@ -6,6 +6,7 @@ pub mod commands;
 pub mod core;
 pub mod error;
 pub mod templates;
+pub use templates as template;
 pub mod utils;
 
 // Re-export commonly used types

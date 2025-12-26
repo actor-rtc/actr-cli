@@ -1,0 +1,27 @@
+[package]
+name = "{{PROJECT_NAME}}"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Actor-RTC framework
+actr-core = { path = "../actr-core" }
+
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+async-trait = "0.1"
+
+# Protocol definitions
+tonic = "0.10"
+prost = "0.12"
+
+# Logging
+tracing = "0.1"
+tracing_subscriber = "0.3"
+
+# Error handling
+anyhow = "1.0"
+
+[build-dependencies]
+tonic-build = "0.10"
+

@@ -60,32 +60,34 @@ fn test_template_case_conversion() {
     use actr_cli::templates::TemplateContext;
 
     // Test snake_case conversion
-    let ctx = TemplateContext::new("MyProject");
+    let ctx = TemplateContext::new("MyProject", "ws://localhost:8080");
     assert_eq!(ctx.project_name_snake, "my_project");
     assert_eq!(ctx.project_name_pascal, "MyProject");
 
     // Test kebab-case conversion
-    let ctx = TemplateContext::new("my-project");
+    let ctx = TemplateContext::new("my-project", "ws://localhost:8080");
     assert_eq!(ctx.project_name_snake, "my_project");
     assert_eq!(ctx.project_name_pascal, "MyProject");
 
     // Test already snake_case
-    let ctx = TemplateContext::new("my_project");
+    let ctx = TemplateContext::new("my_project", "ws://localhost:8080");
     assert_eq!(ctx.project_name_snake, "my_project");
     assert_eq!(ctx.project_name_pascal, "MyProject");
 }
 
 #[test]
 fn test_project_template_basic_generation() {
-    use actr_cli::templates::{ProjectTemplate, TemplateContext};
+    use actr_cli::templates::{
+        ProjectTemplate, ProjectTemplateName, SupportedLanguage, TemplateContext,
+    };
 
     let temp_dir = TempDir::new().unwrap();
 
     // Load basic template
-    let template = ProjectTemplate::load("basic").expect("Failed to load basic template");
+    let template = ProjectTemplate::new(ProjectTemplateName::Echo, SupportedLanguage::Rust);
 
     // Create template context
-    let context = TemplateContext::new("test-service");
+    let context = TemplateContext::new("test-service", "ws://localhost:8080");
 
     // Generate project files
     template
@@ -95,7 +97,6 @@ fn test_project_template_basic_generation() {
     // Verify generated files exist
     assert!(temp_dir.path().join("Cargo.toml").exists());
     assert!(temp_dir.path().join("src/lib.rs").exists());
-    assert!(temp_dir.path().join("protos/greeter.proto").exists());
     assert!(temp_dir.path().join("build.rs").exists());
     assert!(temp_dir.path().join("README.md").exists());
 

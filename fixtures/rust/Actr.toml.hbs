@@ -1,0 +1,25 @@
+edition = 1
+exports = []
+
+[package]
+name = "{{PROJECT_NAME}}"
+manufacturer = "my-company"
+type = "{{PROJECT_NAME_SNAKE}}-service"
+description = "An Actor-RTC service"
+authors = []
+
+[dependencies]
+
+[system.signaling]
+url = "{{SIGNALING_URL}}"
+
+[system.deployment]
+realm = 1001
+
+[system.discovery]
+visible = true
+
+[scripts]
+dev = "cargo run"
+test = "cargo test"
+

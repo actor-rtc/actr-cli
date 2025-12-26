@@ -165,15 +165,15 @@ actr check</code></pre>
         let mut proto_info = Vec::new();
         let proto_dir = Path::new("proto");
 
-        if proto_dir.exists() {
-            if let Ok(entries) = std::fs::read_dir(proto_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().and_then(|s| s.to_str()) == Some("proto") {
-                        let filename = path.file_name().unwrap().to_string_lossy();
-                        let content = std::fs::read_to_string(&path).unwrap_or_default();
-                        proto_info.push((filename.to_string(), content));
-                    }
+        if proto_dir.exists()
+            && let Ok(entries) = std::fs::read_dir(proto_dir)
+        {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|s| s.to_str()) == Some("proto") {
+                    let filename = path.file_name().unwrap().to_string_lossy();
+                    let content = std::fs::read_to_string(&path).unwrap_or_default();
+                    proto_info.push((filename.to_string(), content));
                 }
             }
         }

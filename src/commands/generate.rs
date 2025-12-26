@@ -519,19 +519,20 @@ impl GenCommand {
             let entry = entry.map_err(|e| ActrCliError::config_error(e.to_string()))?;
             let path = entry.path();
 
-            if path.is_file() && path.extension().unwrap_or_default() == "rs" {
-                if let Some(file_name) = path.file_stem().and_then(|s| s.to_str()) {
-                    // 跳过 mod.rs 本身
-                    if file_name == "mod" {
-                        continue;
-                    }
+            if path.is_file()
+                && path.extension().unwrap_or_default() == "rs"
+                && let Some(file_name) = path.file_stem().and_then(|s| s.to_str())
+            {
+                // 跳过 mod.rs 本身
+                if file_name == "mod" {
+                    continue;
+                }
 
-                    // 区分 service_actor 文件和 proto 文件
-                    if file_name.ends_with("_service_actor") {
-                        service_modules.push(format!("pub mod {file_name};"));
-                    } else {
-                        proto_modules.push(format!("pub mod {file_name};"));
-                    }
+                // 区分 service_actor 文件和 proto 文件
+                if file_name.ends_with("_service_actor") {
+                    service_modules.push(format!("pub mod {file_name};"));
+                } else {
+                    proto_modules.push(format!("pub mod {file_name};"));
                 }
             }
         }

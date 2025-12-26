@@ -3,6 +3,7 @@
 use crate::commands::initialize::{self, InitContext};
 use crate::commands::{Command, SupportedLanguage};
 use crate::error::{ActrCliError, Result};
+use crate::template::ProjectTemplateName;
 use async_trait::async_trait;
 use clap::Args;
 use std::io::{self, Write};
@@ -14,9 +15,9 @@ pub struct InitCommand {
     /// Name of the project to create (use '.' for current directory)
     pub name: Option<String>,
 
-    /// Project template to use (echo, chat-room, etc.)
-    #[arg(long)]
-    pub template: Option<String>,
+    /// Project template to use (echo)
+    #[arg(long, default_value_t = ProjectTemplateName::Echo)]
+    pub template: ProjectTemplateName,
 
     /// Project name when initializing in current directory
     #[arg(long)]
@@ -73,7 +74,7 @@ impl Command for InitCommand {
                 project_dir: project_dir.clone(),
                 project_name: project_name.clone(),
                 signaling_url: signaling_url.clone(),
-                template: self.template.clone(),
+                template: self.template,
                 is_current_dir: project_dir == Path::new("."),
             };
             initialize::execute_initialize(self.language, &context)?;
@@ -154,7 +155,6 @@ impl InitCommand {
         project_name: &str,
         signaling_url: &str,
     ) -> Result<()> {
-        let _template_name = self.template.as_deref().unwrap_or("minimal");
         let service_type = format!("{project_name}-service");
 
         // Create Actr.toml directly as string (Config doesn't have default_template or save_to_file)
@@ -366,11 +366,11 @@ test = "cargo test"
 
         // Parse TOML to extract project name
         for line in cargo_content.lines() {
-            if line.trim().starts_with("name = ") {
-                if let Some(name_part) = line.split('=').nth(1) {
-                    let name = name_part.trim().trim_matches('"').trim_matches('\'');
-                    return Ok(name.to_string());
-                }
+            if line.trim().starts_with("name = ")
+                && let Some(name_part) = line.split('=').nth(1)
+            {
+                let name = name_part.trim().trim_matches('"').trim_matches('\'');
+                return Ok(name.to_string());
             }
         }
 
