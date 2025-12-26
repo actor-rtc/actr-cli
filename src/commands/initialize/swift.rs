@@ -1,5 +1,6 @@
 use super::{InitContext, ProjectInitializer};
 use crate::error::{ActrCliError, Result};
+use crate::utils::to_pascal_case;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::info;
@@ -70,10 +71,6 @@ impl ProjectInitializer for SwiftInitializer {
                 app_dir.join("ActrService.swift"),
             ),
             (
-                fixtures_root.join("swift/actr-config.toml"),
-                app_dir.join("actr-config.toml"),
-            ),
-            (
                 fixtures_root.join("swift/Assets.xcassets/Contents.json"),
                 app_dir.join("Assets.xcassets/Contents.json"),
             ),
@@ -132,30 +129,6 @@ fn apply_placeholders(template: &str, replacements: &[(String, String)]) -> Stri
     rendered
 }
 
-fn to_pascal_case(input: &str) -> String {
-    let mut result = String::new();
-    let mut start_of_word = true;
-
-    for c in input.chars() {
-        if !c.is_alphanumeric() {
-            start_of_word = true;
-            continue;
-        }
-
-        if c.is_uppercase() {
-            result.push(c);
-            start_of_word = false;
-        } else if start_of_word {
-            result.push(c.to_uppercase().next().unwrap_or(c));
-            start_of_word = false;
-        } else {
-            result.push(c.to_lowercase().next().unwrap_or(c));
-        }
-    }
-
-    result
-}
-
 fn to_bundle_id(project_name_pascal: &str) -> String {
     format!("io.actr.{project_name_pascal}")
 }
@@ -169,9 +142,9 @@ fn ensure_xcodegen_available() -> Result<()> {
                 "xcodegen is not available. Install via `brew install xcodegen`. {stderr}"
             )))
         }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(
-            ActrCliError::Command("xcodegen not found. Install via `brew install xcodegen`.".to_string()),
-        ),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(ActrCliError::Command(
+            "xcodegen not found. Install via `brew install xcodegen`.".to_string(),
+        )),
         Err(error) => Err(ActrCliError::Command(format!(
             "Failed to run xcodegen: {error}"
         ))),

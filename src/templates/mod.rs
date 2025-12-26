@@ -1,6 +1,7 @@
 //! Project template system
 
 use crate::error::{ActrCliError, Result};
+use crate::utils::{to_pascal_case, to_snake_case};
 use handlebars::Handlebars;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -260,59 +261,9 @@ The service definition is in `protos/greeter.proto`, and the implementation is i
     }
 }
 
-fn to_snake_case(s: &str) -> String {
-    let mut result = String::new();
-    let chars = s.chars().peekable();
-
-    for c in chars {
-        if c.is_uppercase() {
-            if !result.is_empty() {
-                result.push('_');
-            }
-            result.push(c.to_lowercase().next().unwrap());
-        } else if c.is_alphanumeric() {
-            result.push(c);
-        } else {
-            result.push('_');
-        }
-    }
-
-    result
-}
-
-fn to_pascal_case(s: &str) -> String {
-    // Handle already PascalCase or camelCase strings by detecting uppercase transitions
-    let mut result = String::new();
-    let chars = s.chars().peekable();
-    let mut start_of_word = true;
-
-    for c in chars {
-        if !c.is_alphanumeric() {
-            // Separator - next char starts a new word
-            start_of_word = true;
-            continue;
-        }
-
-        if c.is_uppercase() {
-            // Uppercase marks start of a word
-            result.push(c);
-            start_of_word = false;
-        } else if start_of_word {
-            // First char of a word - capitalize it
-            result.push(c.to_uppercase().next().unwrap());
-            start_of_word = false;
-        } else {
-            // Middle of a word - keep as lowercase
-            result.push(c.to_lowercase().next().unwrap());
-        }
-    }
-
-    result
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::utils::{to_pascal_case, to_snake_case};
 
     #[test]
     fn test_to_snake_case() {

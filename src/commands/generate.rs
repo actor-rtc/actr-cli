@@ -66,9 +66,12 @@ impl Command for GenCommand {
 
         let proto_files = self.preprocess()?;
         if self.language != SupportedLanguage::Rust {
+            let manufacturer = self.read_manufacturer()?;
             let context = GenContext {
                 proto_files,
+                input_path: self.input.clone(),
                 output: self.output.clone(),
+                manufacturer,
                 no_scaffold: self.no_scaffold,
                 overwrite_user_code: self.overwrite_user_code,
                 no_format: self.no_format,

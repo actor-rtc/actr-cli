@@ -125,6 +125,16 @@ pub fn get_target_dir(project_root: &Path) -> std::path::PathBuf {
     }
 }
 
+/// Convert a string to PascalCase using heck crate
+pub fn to_pascal_case(input: &str) -> String {
+    heck::AsPascalCase(input).to_string()
+}
+
+/// Convert a string to snake_case using heck crate
+pub fn to_snake_case(input: &str) -> String {
+    heck::AsSnakeCase(input).to_string()
+}
+
 /// Ensure a directory exists, creating it if necessary
 #[allow(dead_code)]
 pub fn ensure_dir_exists(path: &Path) -> Result<()> {

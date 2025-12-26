@@ -244,10 +244,10 @@ test = "cargo test"
                 println!("│  💡 Examples:                                            │");
                 println!("│     ws://localhost:8080/                (development)    │");
                 println!("│     wss://example.com                   (production      │");
-                println!("│     wss://example.com/?token=${{TOKEN}}   (with auth)      │");
+                println!("│     wss://example.com/?token=${{TOKEN}}   (with auth)    │");
                 println!("│                                                          │");
                 println!("└──────────────────────────────────────────────────────────┘");
-                print!("🎯 Enter signaling server URL [ws://localhost:8080/]: ");
+                print!("🎯 Enter signaling server URL [ws://localhost:8080]: ");
             }
             _ => {
                 print!("🎯 Enter {field_name}: ");
@@ -268,7 +268,7 @@ test = "cargo test"
             // Provide sensible defaults
             let default = match field_name {
                 "project name" => "my-actor-project",
-                "signaling server URL" => "ws://localhost:8080/",
+                "signaling server URL" => "ws://localhost:8080",
                 _ => {
                     return Err(ActrCliError::InvalidProject(format!(
                         "{field_name} cannot be empty"
