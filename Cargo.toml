@@ -2,7 +2,7 @@
 name = "actr-cli"
 version = "0.1.5"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "Apache-2.0"
 description = "Command line tool for Actor-RTC framework projects"
 keywords = ["actor", "cli", "codegen", "protobuf", "framework"]
