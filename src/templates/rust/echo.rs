@@ -25,7 +25,7 @@ pub fn load(files: &mut HashMap<String, String>) -> Result<()> {
 
     // proto/echo.proto
     ProjectTemplate::load_file(
-        &fixtures_root.join("echo.proto"),
+        &fixtures_root.join("echo-service/echo.proto"),
         files,
         "protos/echo.proto",
     )?;

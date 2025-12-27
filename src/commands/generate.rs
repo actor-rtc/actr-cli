@@ -31,6 +31,10 @@ pub struct GenCommand {
     #[arg(short, long, default_value = "src/generated")]
     pub output: PathBuf,
 
+    /// Path to Actr.toml config file
+    #[arg(short, long, default_value = "Actr.toml")]
+    pub config: PathBuf,
+
     /// Clean generated outputs before regenerating
     #[arg(long = "clean")]
     pub clean: bool,
@@ -63,15 +67,16 @@ impl Command for GenCommand {
             "🚀 Start code generation (language: {:?})...",
             self.language
         );
+        let config = actr_config::ConfigParser::from_file(&self.config)
+            .map_err(|e| ActrCliError::config_error(format!("Failed to parse Actr.toml: {e}")))?;
 
         let proto_files = self.preprocess()?;
         if self.language != SupportedLanguage::Rust {
-            let manufacturer = self.read_manufacturer()?;
             let context = GenContext {
                 proto_files,
                 input_path: self.input.clone(),
                 output: self.output.clone(),
-                manufacturer,
+                config: config.clone(),
                 no_scaffold: self.no_scaffold,
                 overwrite_user_code: self.overwrite_user_code,
                 no_format: self.no_format,
@@ -82,7 +87,8 @@ impl Command for GenCommand {
         }
 
         // Step 5: Generate infrastructure code
-        self.generate_infrastructure_code(&proto_files).await?;
+        self.generate_infrastructure_code(&proto_files, &config)
+            .await?;
 
         // Step 6: Generate user code scaffold
         if self.should_generate_scaffold() {
@@ -192,27 +198,6 @@ impl GenCommand {
         }
 
         Ok(())
-    }
-
-    /// 读取 Actr.toml 中的 manufacturer
-    fn read_manufacturer(&self) -> Result<String> {
-        use std::fs;
-
-        // Look for Actr.toml in current directory
-        let config_path = PathBuf::from("Actr.toml");
-        if !config_path.exists() {
-            warn!("Actr.toml not found, using default manufacturer 'acme'");
-            return Ok("acme".to_string());
-        }
-
-        // Read and parse TOML directly
-        let content = fs::read_to_string(&config_path)
-            .map_err(|e| ActrCliError::config_error(format!("Failed to read Actr.toml: {e}")))?;
-
-        let raw_config: actr_config::RawConfig = toml::from_str(&content)
-            .map_err(|e| ActrCliError::config_error(format!("Failed to parse Actr.toml: {e}")))?;
-
-        Ok(raw_config.package.actr_type.manufacturer)
     }
 
     /// 验证输入参数
@@ -434,14 +419,17 @@ impl GenCommand {
     }
 
     /// 生成基础设施代码
-    async fn generate_infrastructure_code(&self, proto_files: &[PathBuf]) -> Result<()> {
+    async fn generate_infrastructure_code(
+        &self,
+        proto_files: &[PathBuf],
+        config: &actr_config::Config,
+    ) -> Result<()> {
         info!("🔧 Generating infrastructure code...");
 
         // 确保 protoc 插件可用
         let plugin_path = self.ensure_protoc_plugin()?;
 
-        // 读取 Actr.toml 获取 manufacturer
-        let manufacturer = self.read_manufacturer()?;
+        let manufacturer = config.package.actr_type.manufacturer.clone();
         debug!("Using manufacturer from Actr.toml: {}", manufacturer);
 
         for proto_file in proto_files {

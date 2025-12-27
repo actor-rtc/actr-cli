@@ -105,16 +105,7 @@ private actor ClientWorkload: Workload {
     func onStart(ctx _: ContextBridge) async throws {}
     func onStop(ctx _: ContextBridge) async throws {}
 
-    func dispatch(ctx: ContextBridge, envelope: RpcEnvelopeBridge) async throws -> Data {
-        let targetType = ActrType(manufacturer: "{{MANUFACTURER}}", name: "{{SERVICE_NAME}}")
-
-        let targetId = try await ctx.discover(targetType: targetType)
-        return try await ctx.callRaw(
-            target: targetId,
-            routeKey: envelope.routeKey,
-            payloadType: .rpcReliable,
-            payload: envelope.payload,
-            timeoutMs: 30000
-        )
+    func dispatch(ctx _: ContextBridge, envelope _: RpcEnvelopeBridge) async throws -> Data {
+        throw ActrError.StateError(msg: "Run `actr gen` to generate ActrService implementation")
     }
 }
