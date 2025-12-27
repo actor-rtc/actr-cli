@@ -54,6 +54,10 @@ pub struct GenCommand {
     /// Target language for generation
     #[arg(short, long, default_value = "rust")]
     pub language: SupportedLanguage,
+
+    /// Kotlin package name (for Kotlin language generation)
+    #[arg(long)]
+    pub kotlin_package: Option<String>,
 }
 
 #[async_trait]
@@ -76,6 +80,7 @@ impl Command for GenCommand {
                 overwrite_user_code: self.overwrite_user_code,
                 no_format: self.no_format,
                 debug: self.debug,
+                kotlin_package: self.kotlin_package.clone(),
             };
             execute_codegen(self.language, &context).await?;
             return Ok(());

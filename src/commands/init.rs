@@ -125,8 +125,14 @@ impl InitCommand {
             };
             Ok((PathBuf::from("."), project_name))
         } else {
-            // Create new directory
-            Ok((PathBuf::from(name), name.to_string()))
+            // Create new directory - extract project name from path
+            let path = PathBuf::from(name);
+            let project_name = path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or(name)
+                .to_string();
+            Ok((path, project_name))
         }
     }
 
