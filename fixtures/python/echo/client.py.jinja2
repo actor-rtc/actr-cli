@@ -8,6 +8,11 @@ from pathlib import Path
 
 from actr import ActrSystem, ActrRuntimeError, ActrType, Context, Dest, WorkloadBase
 
+APP_NAME = "{{PROJECT_NAME_PASCAL}}Client"
+PROJECT_NAME = "{{PROJECT_NAME}}"
+PROJECT_NAME_SNAKE = "{{PROJECT_NAME_SNAKE}}"
+SIGNALING_URL = "{{SIGNALING_URL}}"
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "generated"))
 sys.path.insert(0, str(ROOT))
@@ -18,12 +23,12 @@ logger = logging.getLogger(__name__)
 from generated import echo_pb2 as pb2
 
 
-class EchoClientDispatcher:
-    async def dispatch(self, workload, route_key: str, payload: bytes, ctx) -> bytes:
+class {{PROJECT_NAME_PASCAL}}ClientDispatcher:
+    async def dispatch(self, workload, route_key: str, payload: bytes, ctx:Context) -> bytes:
         if not isinstance(ctx, Context):
             ctx = Context(ctx)
 
-        if route_key != "echo.EchoService.Echo":
+        if route_key != "echo.{{PROJECT_NAME_PASCAL}}Service.Echo":
             raise RuntimeError(f"Unknown route_key: {route_key}")
 
         request = pb2.EchoRequest.FromString(payload)
@@ -35,21 +40,21 @@ class EchoClientDispatcher:
 
         response_bytes = await ctx.call(
             Dest.actor(workload.server_id),
-            "echo.EchoService.Echo",
+            "echo.{{PROJECT_NAME_PASCAL}}Service.Echo",
             request,
         )
         response = pb2.EchoResponse.FromString(response_bytes)
         return response.SerializeToString()
 
 
-class EchoClientWorkload(WorkloadBase):
+class {{PROJECT_NAME_PASCAL}}ClientWorkload(WorkloadBase):
     def __init__(self) -> None:
-        self.server_type = ActrType("acme", "EchoService")
+        self.server_type = ActrType("acme", "{{PROJECT_NAME_PASCAL}}Service")
         self.server_id = None
         self.ready = asyncio.Event()
-        super().__init__(EchoClientDispatcher())
+        super().__init__({{PROJECT_NAME_PASCAL}}ClientDispatcher())
 
-    async def on_start(self, ctx) -> None:
+    async def on_start(self, ctx:Context) -> None:
         logger.info("discovering echo service...")
         try:
             server_id = await ctx.discover(self.server_type)
@@ -61,13 +66,13 @@ class EchoClientWorkload(WorkloadBase):
         self.ready.set()
         logger.info("discovered server: %s", server_id)
 
-    async def on_stop(self, ctx) -> None:
-        logger.info("EchoClientWorkload on_stop")
+    async def on_stop(self, ctx:Context) -> None:
+        logger.info("{{PROJECT_NAME_PASCAL}}ClientWorkload on_stop")
 
 
 async def _run_app(ref) -> None:
-    logger.info("Echo client app started")
-    print("===== Echo Client App =====")
+    logger.info("[%s] %s app started", PROJECT_NAME_SNAKE, APP_NAME)
+    print(f"===== {APP_NAME} =====")
     print("Type messages to send to server (type 'quit' to exit):")
 
     loop = asyncio.get_running_loop()
@@ -81,7 +86,7 @@ async def _run_app(ref) -> None:
 
         request = pb2.EchoRequest(message=line)
         try:
-            response_bytes = await ref.call("echo.EchoService.Echo", request)
+            response_bytes = await ref.call(f"echo.{{PROJECT_NAME_PASCAL}}Service.Echo", request)
             response = pb2.EchoResponse.FromString(response_bytes)
             print(f"[Received reply] {response.reply}")
         except Exception as e:
@@ -95,10 +100,11 @@ async def main() -> int:
     args = ap.parse_args()
 
     system = await ActrSystem.from_toml(args.actr_toml)
-    workload = EchoClientWorkload()
+    workload = {{PROJECT_NAME_PASCAL}}ClientWorkload()
     node = system.attach(workload)
     ref = await node.start()
-    logger.info("✅ Echo client started! Actor ID: %s", ref.actor_id())
+    logger.info("✅ %s started! Actor ID: %s", APP_NAME, ref.actor_id())
+    logger.info("signaling: %s", SIGNALING_URL)
 
     await _run_app(ref)
     ref.shutdown()
