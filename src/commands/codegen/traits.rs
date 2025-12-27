@@ -2,6 +2,18 @@ use crate::error::Result;
 use async_trait::async_trait;
 use std::path::PathBuf;
 
+/// Type of scaffold code to generate
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ScaffoldType {
+    /// Generate server-side scaffold only
+    Server,
+    /// Generate client-side scaffold only
+    Client,
+    /// Generate both server and client scaffolds
+    #[default]
+    Both,
+}
+
 /// Context for code generation
 #[derive(Debug, Clone)]
 pub struct GenContext {
@@ -15,6 +27,8 @@ pub struct GenContext {
     pub debug: bool,
     /// Kotlin package name (for Kotlin language generation)
     pub kotlin_package: Option<String>,
+    /// Scaffold type to generate (server, client, or both)
+    pub scaffold_type: ScaffoldType,
 }
 
 /// Interface for language-specific code generators

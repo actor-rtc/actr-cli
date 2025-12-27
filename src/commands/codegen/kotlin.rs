@@ -43,12 +43,12 @@ impl KotlinGenerator {
             .arg("protoc-gen-actrframework-kotlin")
             .output();
 
-        if let Ok(output) = output {
-            if output.status.success() {
-                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !path.is_empty() {
-                    return Ok(PathBuf::from(path));
-                }
+        if let Ok(output) = output
+            && output.status.success()
+        {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Ok(PathBuf::from(path));
             }
         }
 
@@ -142,6 +142,8 @@ impl LanguageGenerator for KotlinGenerator {
     }
 
     async fn generate_scaffold(&self, context: &GenContext) -> Result<Vec<PathBuf>> {
+        use crate::commands::codegen::traits::ScaffoldType;
+
         if context.no_scaffold {
             return Ok(vec![]);
         }
@@ -158,43 +160,74 @@ impl LanguageGenerator for KotlinGenerator {
                 .unwrap_or("unknown");
 
             let pascal_name = to_pascal_case(service_name);
+            let output_dir = context.output.parent().unwrap_or(&context.output);
 
-            // Generate Handler implementation (My{ServiceName}.kt)
-            let handler_file = context
-                .output
-                .parent()
-                .unwrap_or(&context.output)
-                .join(format!("My{}.kt", pascal_name));
+            // Generate server-side scaffold if requested
+            if matches!(
+                context.scaffold_type,
+                ScaffoldType::Server | ScaffoldType::Both
+            ) {
+                // Generate Handler implementation (My{ServiceName}.kt)
+                let handler_file = output_dir.join(format!("My{}.kt", pascal_name));
 
-            if !handler_file.exists() || context.overwrite_user_code {
-                let handler_content =
-                    generate_kotlin_handler_scaffold(service_name, &kotlin_package);
-                std::fs::write(&handler_file, handler_content).map_err(|e| {
-                    ActrCliError::config_error(format!("Failed to write handler file: {e}"))
-                })?;
-                info!("📄 Generated handler scaffold: {:?}", handler_file);
-                generated_files.push(handler_file);
-            } else {
-                info!("⏭️  Skipping existing handler file: {:?}", handler_file);
+                if !handler_file.exists() || context.overwrite_user_code {
+                    let handler_content =
+                        generate_kotlin_handler_scaffold(service_name, &kotlin_package);
+                    std::fs::write(&handler_file, handler_content).map_err(|e| {
+                        ActrCliError::config_error(format!("Failed to write handler file: {e}"))
+                    })?;
+                    info!("📄 Generated server handler scaffold: {:?}", handler_file);
+                    generated_files.push(handler_file);
+                } else {
+                    info!("⏭️  Skipping existing handler file: {:?}", handler_file);
+                }
+
+                // Generate Workload class ({ServiceName}Workload.kt)
+                let workload_file = output_dir.join(format!("{}Workload.kt", pascal_name));
+
+                if !workload_file.exists() || context.overwrite_user_code {
+                    let workload_content =
+                        generate_kotlin_workload_scaffold(service_name, &kotlin_package);
+                    std::fs::write(&workload_file, workload_content).map_err(|e| {
+                        ActrCliError::config_error(format!("Failed to write workload file: {e}"))
+                    })?;
+                    info!("📄 Generated server workload scaffold: {:?}", workload_file);
+                    generated_files.push(workload_file);
+                } else {
+                    info!("⏭️  Skipping existing workload file: {:?}", workload_file);
+                }
             }
 
-            // Generate Workload class ({ServiceName}Workload.kt)
-            let workload_file = context
-                .output
-                .parent()
-                .unwrap_or(&context.output)
-                .join(format!("{}Workload.kt", pascal_name));
+            // Generate client-side scaffold if requested
+            if matches!(
+                context.scaffold_type,
+                ScaffoldType::Client | ScaffoldType::Both
+            ) {
+                // Generate Client Workload ({ServiceName}ClientWorkload.kt)
+                let client_workload_file =
+                    output_dir.join(format!("{}ClientWorkload.kt", pascal_name));
 
-            if !workload_file.exists() || context.overwrite_user_code {
-                let workload_content =
-                    generate_kotlin_workload_scaffold(service_name, &kotlin_package);
-                std::fs::write(&workload_file, workload_content).map_err(|e| {
-                    ActrCliError::config_error(format!("Failed to write workload file: {e}"))
-                })?;
-                info!("📄 Generated workload scaffold: {:?}", workload_file);
-                generated_files.push(workload_file);
-            } else {
-                info!("⏭️  Skipping existing workload file: {:?}", workload_file);
+                if !client_workload_file.exists() || context.overwrite_user_code {
+                    let client_workload_content =
+                        generate_kotlin_client_workload_scaffold(service_name, &kotlin_package);
+                    std::fs::write(&client_workload_file, client_workload_content).map_err(
+                        |e| {
+                            ActrCliError::config_error(format!(
+                                "Failed to write client workload file: {e}"
+                            ))
+                        },
+                    )?;
+                    info!(
+                        "📄 Generated client workload scaffold: {:?}",
+                        client_workload_file
+                    );
+                    generated_files.push(client_workload_file);
+                } else {
+                    info!(
+                        "⏭️  Skipping existing client workload file: {:?}",
+                        client_workload_file
+                    );
+                }
             }
         }
 
@@ -427,6 +460,144 @@ class {pascal_name}ServiceWorkload(
         Log.i(TAG, "   payload size: ${{envelope.payload.size}} bytes")
 
         return {pascal_name}ServiceDispatcher.dispatch(handler, ctx, envelope)
+    }}
+}}
+"#
+    )
+}
+
+/// Generate Kotlin Client Workload scaffold
+fn generate_kotlin_client_workload_scaffold(service_name: &str, kotlin_package: &str) -> String {
+    let pascal_name = to_pascal_case(service_name);
+
+    // Base package is kotlin_package without trailing ".generated" if present
+    let base_package = kotlin_package
+        .strip_suffix(".generated")
+        .unwrap_or(kotlin_package);
+
+    // Proto package (lowercase service name)
+    let proto_package = service_name.to_lowercase();
+
+    format!(
+        r#"/**
+ * {pascal_name}Service Client Workload Implementation
+ *
+ * This client-side Workload forwards RPC requests to a remote {pascal_name}Service.
+ * It uses the generated Handler interface and Dispatcher for type-safe RPC handling.
+ */
+package {base_package}
+
+import android.util.Log
+import {kotlin_package}.{pascal_name}ServiceDispatcher
+import {kotlin_package}.{pascal_name}ServiceHandler
+import {proto_package}.{pascal_name}.*
+import io.actor_rtc.actr.ActrId
+import io.actor_rtc.actr.ActrType
+import io.actor_rtc.actr.ContextBridge
+import io.actor_rtc.actr.PayloadType
+import io.actor_rtc.actr.Realm
+import io.actor_rtc.actr.RpcEnvelopeBridge
+import io.actor_rtc.actr.WorkloadBridge
+
+/**
+ * Client-side handler that forwards requests to the remote {pascal_name}Service.
+ * This demonstrates using the generated Handler interface for client-side logic.
+ */
+class {pascal_name}ClientHandler(
+    private val ctx: ContextBridge,
+    private val serverId: ActrId
+) : {pascal_name}ServiceHandler {{
+
+    companion object {{
+        private const val TAG = "{pascal_name}ClientHandler"
+    }}
+
+    override suspend fun echo(request: {pascal_name}Request, ctx: ContextBridge): {pascal_name}Response {{
+        Log.i(TAG, "📤 Forwarding echo request to server: ${{request.message}}")
+
+        // Forward to remote {pascal_name}Service
+        val response = ctx.callRaw(
+            serverId,
+            "{proto_package}.{pascal_name}Service.Echo",
+            PayloadType.RPC_RELIABLE,
+            request.toByteArray(),
+            30000L
+        )
+
+        val echoResponse = {pascal_name}Response.parseFrom(response)
+        Log.i(TAG, "📥 Received response from server: ${{echoResponse.reply}}")
+        return echoResponse
+    }}
+}}
+
+/**
+ * Client Workload for {pascal_name}Service
+ *
+ * This Workload:
+ * 1. Discovers the remote {pascal_name}Service in onStart
+ * 2. Uses EchoServiceDispatcher to route requests to handler
+ * 3. Handler forwards requests to the remote server
+ *
+ * Usage:
+ * ```kotlin
+ * val workload = {pascal_name}ClientWorkload()
+ * val system = createActrSystem(configPath)
+ * val node = system.attach(workload)
+ * val actrRef = node.start()
+ *
+ * // Wait for discovery to complete
+ * delay(2000)
+ *
+ * // Make RPC call
+ * val request = {pascal_name}Request.newBuilder().setMessage("Hello").build()
+ * val response = actrRef.call("{proto_package}.{pascal_name}Service.Echo", PayloadType.RPC_RELIABLE, request.toByteArray(), 30000L)
+ * val echoResponse = {pascal_name}Response.parseFrom(response)
+ * ```
+ */
+class {pascal_name}ClientWorkload(
+    private val realmId: UInt = 2281844430u
+) : WorkloadBridge {{
+
+    companion object {{
+        private const val TAG = "{pascal_name}ClientWorkload"
+    }}
+
+    // Server ID discovered in onStart
+    private var serverId: ActrId? = null
+    private var handler: {pascal_name}ClientHandler? = null
+
+    override suspend fun onStart(ctx: ContextBridge) {{
+        Log.i(TAG, "{pascal_name}ClientWorkload.onStart: Starting...")
+
+        // Pre-discover the {pascal_name}Service
+        Log.i(TAG, "📡 Discovering {pascal_name}Service...")
+        val targetType = ActrType(manufacturer = "acme", name = "{pascal_name}Service")
+        serverId = ctx.discover(targetType)
+        Log.i(TAG, "✅ Found {pascal_name}Service: ${{serverId?.serialNumber}}")
+
+        // Create handler with discovered server ID
+        handler = {pascal_name}ClientHandler(ctx, serverId!!)
+    }}
+
+    override suspend fun onStop(ctx: ContextBridge) {{
+        Log.i(TAG, "{pascal_name}ClientWorkload.onStop")
+        // Cleanup resources
+    }}
+
+    /**
+     * Dispatch RPC requests using the generated Dispatcher
+     */
+    override suspend fun dispatch(ctx: ContextBridge, envelope: RpcEnvelopeBridge): ByteArray {{
+        Log.i(TAG, "🔀 {pascal_name}ClientWorkload.dispatch() called!")
+        Log.i(TAG, "   route_key: ${{envelope.routeKey}}")
+        Log.i(TAG, "   request_id: ${{envelope.requestId}}")
+        Log.i(TAG, "   payload size: ${{envelope.payload.size}} bytes")
+
+        val currentHandler = handler
+            ?: throw IllegalStateException("Handler not initialized - {pascal_name}Service not discovered yet")
+
+        // Use generated Dispatcher to route to handler
+        return {pascal_name}ServiceDispatcher.dispatch(currentHandler, ctx, envelope)
     }}
 }}
 "#

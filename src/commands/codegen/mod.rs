@@ -9,7 +9,7 @@ use kotlin::KotlinGenerator;
 use python::PythonGenerator;
 use swift::SwiftGenerator;
 use tracing::info;
-pub use traits::{GenContext, LanguageGenerator};
+pub use traits::{GenContext, LanguageGenerator, ScaffoldType};
 
 pub struct GeneratorFactory;
 

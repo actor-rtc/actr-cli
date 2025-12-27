@@ -7,7 +7,7 @@
 
 use crate::commands::Command;
 use crate::commands::SupportedLanguage;
-use crate::commands::codegen::{GenContext, execute_codegen};
+use crate::commands::codegen::{GenContext, ScaffoldType as ContextScaffoldType, execute_codegen};
 use crate::error::{ActrCliError, Result};
 // 只导入必要的类型，避免拉入不需要的依赖如 sqlite
 // use actr_framework::prelude::*;
@@ -58,6 +58,25 @@ pub struct GenCommand {
     /// Kotlin package name (for Kotlin language generation)
     #[arg(long)]
     pub kotlin_package: Option<String>,
+
+    /// Scaffold type to generate: server, client, or both (default: both)
+    /// - server: Generate server-side scaffold (MyEcho.kt, EchoWorkload.kt)
+    /// - client: Generate client-side scaffold (EchoClientWorkload.kt)
+    /// - both: Generate both server and client scaffolds
+    #[arg(long, default_value = "both")]
+    pub scaffold_type: ScaffoldType,
+}
+
+/// Type of scaffold code to generate
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+pub enum ScaffoldType {
+    /// Generate server-side scaffold only
+    Server,
+    /// Generate client-side scaffold only
+    Client,
+    /// Generate both server and client scaffolds
+    #[default]
+    Both,
 }
 
 #[async_trait]
@@ -71,6 +90,12 @@ impl Command for GenCommand {
         let proto_files = self.preprocess()?;
         if self.language != SupportedLanguage::Rust {
             let manufacturer = self.read_manufacturer()?;
+            // Convert local ScaffoldType to context ScaffoldType
+            let scaffold_type = match self.scaffold_type {
+                ScaffoldType::Server => ContextScaffoldType::Server,
+                ScaffoldType::Client => ContextScaffoldType::Client,
+                ScaffoldType::Both => ContextScaffoldType::Both,
+            };
             let context = GenContext {
                 proto_files,
                 input_path: self.input.clone(),
@@ -81,6 +106,7 @@ impl Command for GenCommand {
                 no_format: self.no_format,
                 debug: self.debug,
                 kotlin_package: self.kotlin_package.clone(),
+                scaffold_type,
             };
             execute_codegen(self.language, &context).await?;
             return Ok(());

@@ -47,12 +47,10 @@ protobuf {
 }
 
 dependencies {
-    // actr-kotlin library
-    // Option 1: From JitPack (requires repo setup)
-    // implementation("com.github.actor-rtc.actr-kotlin:actr-kotlin:main-SNAPSHOT")
-
-    // Option 2: Local AAR file - copy actr-kotlin-release.aar to app/libs/
-    implementation(files("libs/actr-kotlin-release.aar"))
+    // actr-kotlin library from JitPack
+    implementation("com.github.actor-rtc:actr-kotlin:37eacf2") {
+        exclude(group = "net.java.dev.jna", module = "jna")
+    }
 
     // JNA for UniFFI bindings (required by actr-kotlin)
     implementation("net.java.dev.jna:jna:5.14.0@aar")

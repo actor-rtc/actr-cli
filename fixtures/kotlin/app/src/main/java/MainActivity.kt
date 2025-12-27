@@ -1,15 +1,22 @@
 package {{PACKAGE_NAME}}
 
 import android.os.Bundle
+import android.util.Log
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import echo.Echo.EchoRequest
+import echo.Echo.EchoResponse
+import io.actor_rtc.actr.PayloadType
+import io.actor_rtc.actr.dsl.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import {{PACKAGE_NAME}}.R
 
 /**
@@ -19,13 +26,12 @@ import {{PACKAGE_NAME}}.R
  * 1. Connect to the Echo server via Actor-RTC
  * 2. Send messages and receive echo responses
  * 3. Display connection status and message logs
- *
- * To complete the implementation:
- * 1. Run `actr gen -l kotlin -i protos/echo.proto -o app/src/main/java/{{PACKAGE_PATH}}/generated`
- * 2. Copy actr-kotlin library (AAR or source) to the project
- * 3. Implement ActrService.kt with the generated code
  */
 class MainActivity : AppCompatActivity() {
+
+    companion object {
+        private const val TAG = "MainActivity"
+    }
 
     private lateinit var statusText: TextView
     private lateinit var connectButton: Button
@@ -35,8 +41,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var logText: TextView
     private lateinit var scrollView: ScrollView
 
-    // TODO: Initialize ActrService
-    // private lateinit var actrService: ActrService
+    // Actor-RTC components
+    private var clientRef: ActrRef? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -73,15 +79,38 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun copyAssetToInternalStorage(assetName: String): String {
+        val inputStream = assets.open(assetName)
+        val outputFile = File(filesDir, assetName)
+        outputFile.parentFile?.mkdirs()
+        inputStream.use { input ->
+            outputFile.outputStream().use { output -> input.copyTo(output) }
+        }
+        return outputFile.absolutePath
+    }
+
     private fun connect() {
         updateStatus("Connecting...")
         connectButton.isEnabled = false
         
         lifecycleScope.launch {
             try {
-                // TODO: Initialize and start ActrService
-                // actrService = ActrService(applicationContext)
-                // actrService.start()
+                // Copy config file from assets to internal storage
+                val configPath = copyAssetToInternalStorage("actr-config.toml")
+                Log.i(TAG, "Config path: $configPath")
+
+                // Create ActrSystem
+                val clientSystem = createActrSystem(configPath)
+
+                // Create and start EchoClientWorkload
+                Log.i(TAG, "🚀 Starting EchoClient...")
+                val clientWorkload = EchoClientWorkload()
+                val clientNode = clientSystem.attach(clientWorkload)
+                clientRef = clientNode.start()
+                Log.i(TAG, "✅ Client started: ${clientRef?.actorId()?.serialNumber}")
+
+                // Wait for client to discover the server
+                delay(2000)
                 
                 withContext(Dispatchers.Main) {
                     updateStatus("Connected")
@@ -89,8 +118,10 @@ class MainActivity : AppCompatActivity() {
                     messageInput.isEnabled = true
                     sendButton.isEnabled = true
                     log("Connected to Echo server")
+                    log("Client ID: ${clientRef?.actorId()?.serialNumber}")
                 }
             } catch (e: Exception) {
+                Log.e(TAG, "Connection failed", e)
                 withContext(Dispatchers.Main) {
                     updateStatus("Connection failed")
                     connectButton.isEnabled = true
@@ -108,8 +139,10 @@ class MainActivity : AppCompatActivity() {
         
         lifecycleScope.launch {
             try {
-                // TODO: Stop ActrService
-                // actrService.stop()
+                // Shutdown the client
+                clientRef?.shutdown()
+                clientRef?.awaitShutdown()
+                clientRef = null
                 
                 withContext(Dispatchers.Main) {
                     updateStatus("Disconnected")
@@ -117,9 +150,11 @@ class MainActivity : AppCompatActivity() {
                     log("Disconnected from Echo server")
                 }
             } catch (e: Exception) {
+                Log.e(TAG, "Disconnect error", e)
                 withContext(Dispatchers.Main) {
                     updateStatus("Disconnected")
                     connectButton.isEnabled = true
+                    clientRef = null
                     log("Disconnect error: ${e.message}")
                 }
             }
@@ -130,22 +165,42 @@ class MainActivity : AppCompatActivity() {
         val message = messageInput.text.toString().trim()
         if (message.isEmpty()) return
 
+        val ref = clientRef
+        if (ref == null) {
+            log("Error: Not connected")
+            return
+        }
+
         messageInput.text.clear()
-        log("Sending: $message")
+        log("📤 Sending: $message")
 
         lifecycleScope.launch {
             try {
-                // TODO: Send echo request
-                // val response = actrService.echo(message)
-                // log("Received: ${response.reply}")
+                // Create EchoRequest using generated protobuf class
+                val request = EchoRequest.newBuilder()
+                    .setMessage(message)
+                    .build()
+
+                // Send RPC via ActrRef.call()
+                Log.i(TAG, "📞 Sending RPC via ActrRef.call()...")
+                val responsePayload = ref.call(
+                    "echo.EchoService.Echo",
+                    PayloadType.RPC_RELIABLE,
+                    request.toByteArray(),
+                    30000L
+                )
+
+                // Parse response using generated protobuf class
+                val response = EchoResponse.parseFrom(responsePayload)
+                Log.i(TAG, "📬 Response: ${response.reply}")
                 
-                // Placeholder until ActrService is implemented
                 withContext(Dispatchers.Main) {
-                    log("Echo: $message (stub - implement ActrService)")
+                    log("📥 Received: ${response.reply}")
                 }
             } catch (e: Exception) {
+                Log.e(TAG, "Send error", e)
                 withContext(Dispatchers.Main) {
-                    log("Send error: ${e.message}")
+                    log("❌ Send error: ${e.message}")
                 }
             }
         }
@@ -165,9 +220,14 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        // TODO: Clean up ActrService
-        // if (::actrService.isInitialized) {
-        //     actrService.stop()
-        // }
+        // Clean up ActrRef
+        lifecycleScope.launch {
+            try {
+                clientRef?.shutdown()
+                clientRef?.awaitShutdown()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error during cleanup: ${e.message}")
+            }
+        }
     }
 }
