@@ -46,6 +46,10 @@ pub struct TemplateContext {
     pub project_name_pascal: String,
     #[serde(rename = "SIGNALING_URL")]
     pub signaling_url: String,
+    #[serde(rename = "MANUFACTURER")]
+    pub manufacturer: String,
+    #[serde(rename = "SERVICE_NAME")]
+    pub service_name: String,
 }
 
 impl TemplateContext {
@@ -55,6 +59,8 @@ impl TemplateContext {
             project_name_snake: to_snake_case(project_name),
             project_name_pascal: to_pascal_case(project_name),
             signaling_url: signaling_url.to_string(),
+            manufacturer: "unknown".to_string(),
+            service_name: "UnknownService".to_string(),
         }
     }
 }

@@ -38,13 +38,18 @@ pub fn load(files: &mut HashMap<String, String>) -> Result<()> {
         "{{PROJECT_NAME_PASCAL}}/ContentView.swift",
     )?;
     ProjectTemplate::load_file(
-        &fixtures_root.join("swift/ActrService.swift.hbs"),
+        &fixtures_root.join("swift/ActrService.swift.init.hbs"),
         files,
         "{{PROJECT_NAME_PASCAL}}/ActrService.swift",
     )?;
+    ProjectTemplate::load_file(
+        &fixtures_root.join("swift/ActrService+Echo.swift.hbs"),
+        files,
+        "{{PROJECT_NAME_PASCAL}}/ActrService+Echo.swift",
+    )?;
     // Load fixture files (no placeholders, fixed paths)
     ProjectTemplate::load_file(
-        &fixtures_root.join("echo.proto"),
+        &fixtures_root.join("echo-service/echo.proto"),
         files,
         "protos/echo.proto",
     )?;

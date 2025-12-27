@@ -50,14 +50,15 @@ struct ContentView: View {
             guard !isInitialized else { return }
             initializeActrService()
         }
-        .alert(isPresented: .constant(actrService.errorMessage != nil)) {
-            Alert(
-                title: Text("Error"),
-                message: Text(actrService.errorMessage ?? "Unknown error"),
-                dismissButton: .default(Text("OK")) {
-                    actrService.errorMessage = nil
-                }
-            )
+        .alert("Error", isPresented: Binding(
+            get: { actrService.errorMessage != nil },
+            set: { if !$0 { actrService.errorMessage = nil } }
+        )) {
+            Button("OK") {
+                actrService.errorMessage = nil
+            }
+        } message: {
+            Text(actrService.errorMessage ?? "Unknown error")
         }
     }
 

@@ -1,4 +1,5 @@
 use crate::error::Result;
+use actr_config::Config;
 use async_trait::async_trait;
 use std::path::PathBuf;
 
@@ -20,7 +21,7 @@ pub struct GenContext {
     pub proto_files: Vec<PathBuf>,
     pub input_path: PathBuf,
     pub output: PathBuf,
-    pub manufacturer: String,
+    pub config: Config,
     pub no_scaffold: bool,
     pub overwrite_user_code: bool,
     pub no_format: bool,
