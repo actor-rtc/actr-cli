@@ -1,0 +1,68 @@
+import Actr
+import Foundation
+import OSLog
+import SwiftProtobuf
+import SwiftUI
+
+// ActrService scaffold - run `actr gen` to generate full implementation
+
+@MainActor
+final class ActrService: ObservableObject {
+    @Published var connectionStatus: ConnectionStatus = .disconnected
+    @Published var errorMessage: String?
+
+    internal var actrSystem: ActrSystem?
+    internal var actrNode: ActrNode?
+    internal var actr: Actr?
+    private var workload: ClientWorkload?
+    private let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "io.actr.App",
+        category: "ActrService"
+    )
+
+    /// Initialize the service and its underlying actors
+    func initialize() async throws {
+        connectionStatus = .initializing
+        errorMessage = nil
+        logger.info("Initializing ActrService...")
+
+        // TODO: Run `actr gen` to generate full implementation
+        throw ActrError.StateError(msg: "Run `actr gen` to generate ActrService implementation")
+    }
+
+    /// Shutdown the service and cleanup resources
+    func shutdown() async {
+        logger.info("Shutting down ActrService...")
+        connectionStatus = .disconnected
+        errorMessage = nil
+    }
+}
+
+extension ActrService {
+    enum ConnectionStatus {
+        case disconnected
+        case initializing
+        case connected
+        case error
+
+        var description: String {
+            switch self {
+            case .disconnected: return "Disconnected"
+            case .initializing: return "Initializing..."
+            case .connected: return "Connected"
+            case .error: return "Error"
+            }
+        }
+    }
+}
+
+private actor ClientWorkload: Workload {
+    init() {}
+
+    func onStart(ctx _: ContextBridge) async throws {}
+    func onStop(ctx _: ContextBridge) async throws {}
+
+    func dispatch(ctx _: ContextBridge, envelope _: RpcEnvelopeBridge) async throws -> Data {
+        throw ActrError.StateError(msg: "Run `actr gen` to generate full implementation")
+    }
+}
