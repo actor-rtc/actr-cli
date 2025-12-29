@@ -58,13 +58,32 @@ impl KotlinGenerator {
         ))
     }
 
-    /// Get Kotlin package name from parameters or infer from proto
+    /// Get Kotlin package name - infer from output path or use default
     fn get_kotlin_package(&self, context: &GenContext) -> String {
-        // Use kotlin_package from context if provided, otherwise use default
-        context
-            .kotlin_package
-            .clone()
-            .unwrap_or_else(|| "com.example.generated".to_string())
+        // Try to infer package from output path
+        // e.g., ".../java/io/actr/testkotlinecho/generated" -> "io.actr.testkotlinecho.generated"
+        let output_str = context.output.to_string_lossy();
+        debug!("get_kotlin_package: output_str = {}", output_str);
+
+        // Look for common Java/Kotlin source roots
+        for marker in &["/java/", "/kotlin/"] {
+            if let Some(pos) = output_str.find(marker) {
+                let after_marker = &output_str[pos + marker.len()..];
+                // Convert path to package name (replace / with .)
+                let package = after_marker.replace('/', ".").replace('\\', ".");
+                debug!(
+                    "get_kotlin_package: found marker {}, package = {}",
+                    marker, package
+                );
+                if !package.is_empty() {
+                    return package;
+                }
+            }
+        }
+
+        // Fallback to default
+        debug!("get_kotlin_package: using fallback com.example.generated");
+        "com.example.generated".to_string()
     }
 }
 
@@ -162,11 +181,11 @@ impl LanguageGenerator for KotlinGenerator {
             let pascal_name = to_pascal_case(service_name);
             let output_dir = context.output.parent().unwrap_or(&context.output);
 
+            // Always generate both server and client scaffolds
+            let scaffold_type = ScaffoldType::Both;
+
             // Generate server-side scaffold if requested
-            if matches!(
-                context.scaffold_type,
-                ScaffoldType::Server | ScaffoldType::Both
-            ) {
+            if matches!(scaffold_type, ScaffoldType::Server | ScaffoldType::Both) {
                 // Generate Handler implementation (My{ServiceName}.kt)
                 let handler_file = output_dir.join(format!("My{}.kt", pascal_name));
 
@@ -199,10 +218,7 @@ impl LanguageGenerator for KotlinGenerator {
             }
 
             // Generate client-side scaffold if requested
-            if matches!(
-                context.scaffold_type,
-                ScaffoldType::Client | ScaffoldType::Both
-            ) {
+            if matches!(scaffold_type, ScaffoldType::Client | ScaffoldType::Both) {
                 // Generate Client Workload ({ServiceName}ClientWorkload.kt)
                 let client_workload_file =
                     output_dir.join(format!("{}ClientWorkload.kt", pascal_name));

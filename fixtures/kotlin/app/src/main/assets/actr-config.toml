@@ -34,8 +34,8 @@ tracing_service_name = "{{PROJECT_NAME}}-client"
 
 [system.webrtc]
 force_relay = true
-stun_urls = ["stun:10.0.2.2:3478"]
-turn_urls = ["turn:10.0.2.2:3478"]
+stun_urls = ["stun:{{SIGNALING_HOST}}:3478"]
+turn_urls = ["turn:{{SIGNALING_HOST}}:3478"]
 
 # ACL configuration - allow communication with EchoService
 [acl]

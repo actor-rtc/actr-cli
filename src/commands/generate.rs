@@ -58,29 +58,6 @@ pub struct GenCommand {
     /// Target language for generation
     #[arg(short, long, default_value = "rust")]
     pub language: SupportedLanguage,
-
-    /// Kotlin package name (for Kotlin language generation)
-    #[arg(long)]
-    pub kotlin_package: Option<String>,
-
-    /// Scaffold type to generate: server, client, or both (default: both)
-    /// - server: Generate server-side scaffold (MyEcho.kt, EchoWorkload.kt)
-    /// - client: Generate client-side scaffold (EchoClientWorkload.kt)
-    /// - both: Generate both server and client scaffolds
-    #[arg(long, default_value = "both")]
-    pub scaffold_type: ScaffoldType,
-}
-
-/// Type of scaffold code to generate
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
-pub enum ScaffoldType {
-    /// Generate server-side scaffold only
-    Server,
-    /// Generate client-side scaffold only
-    Client,
-    /// Generate both server and client scaffolds
-    #[default]
-    Both,
 }
 
 #[async_trait]
@@ -104,8 +81,6 @@ impl Command for GenCommand {
                 overwrite_user_code: self.overwrite_user_code,
                 no_format: self.no_format,
                 debug: self.debug,
-                kotlin_package: None,
-                scaffold_type: crate::commands::codegen::ScaffoldType::Both,
             };
             execute_codegen(self.language, &context).await?;
             return Ok(());

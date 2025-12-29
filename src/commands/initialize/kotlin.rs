@@ -19,6 +19,16 @@ impl ProjectInitializer for KotlinInitializer {
         let package_name = to_package_name(&context.project_name);
         let package_path = package_name.replace('.', "/");
 
+        // Extract host from signaling URL (e.g., "ws://10.30.3.206:8081/signaling/ws" -> "10.30.3.206")
+        let signaling_host = context
+            .signaling_url
+            .trim_start_matches("ws://")
+            .trim_start_matches("wss://")
+            .split(':')
+            .next()
+            .unwrap_or("10.0.2.2")
+            .to_string();
+
         let replacements = vec![
             ("{{PROJECT_NAME}}".to_string(), context.project_name.clone()),
             (
@@ -31,6 +41,7 @@ impl ProjectInitializer for KotlinInitializer {
                 "{{SIGNALING_URL}}".to_string(),
                 context.signaling_url.clone(),
             ),
+            ("{{SIGNALING_HOST}}".to_string(), signaling_host),
         ];
 
         let fixtures_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures");
@@ -60,12 +71,12 @@ impl ProjectInitializer for KotlinInitializer {
                 context.project_dir.join(".gitignore"),
             ),
             (
-                fixtures_root.join("echo.proto"),
+                fixtures_root.join("echo-service/echo.proto"),
                 context.project_dir.join("protos/echo.proto"),
             ),
             // Also copy proto to app/src/main/proto for Gradle protobuf plugin
             (
-                fixtures_root.join("echo.proto"),
+                fixtures_root.join("echo-service/echo.proto"),
                 app_dir.join("src/main/proto/echo.proto"),
             ),
             // App module files
@@ -140,9 +151,9 @@ impl ProjectInitializer for KotlinInitializer {
         std::fs::create_dir_all(&generated_dir)?;
 
         let proto_file = context.project_dir.join("protos/echo.proto");
+        let config_file = context.project_dir.join("Actr.toml");
         if proto_file.exists() {
-            // Run actr gen command with --no-scaffold to only generate Handler/Dispatcher
-            // The scaffold code (MyEcho.kt, EchoWorkload.kt) would conflict with our templates
+            // Run actr gen command to generate Handler/Dispatcher and scaffold code
             let output = std::process::Command::new("actr")
                 .arg("gen")
                 .arg("-l")
@@ -151,8 +162,8 @@ impl ProjectInitializer for KotlinInitializer {
                 .arg(&proto_file)
                 .arg("-o")
                 .arg(&generated_dir)
-                .arg("--kotlin-package")
-                .arg(format!("{}.generated", package_name))
+                .arg("--config")
+                .arg(&config_file)
                 .output();
 
             match output {
@@ -166,9 +177,8 @@ impl ProjectInitializer for KotlinInitializer {
                 }
                 Err(e) => {
                     tracing::warn!(
-                        "⚠️  Could not run 'actr gen'. Please run manually: actr gen -l kotlin -i protos/echo.proto -o app/src/main/java/{}/generated --kotlin-package {}.generated. Error: {}",
+                        "⚠️  Could not run 'actr gen'. Please run manually: actr gen -l kotlin -i protos/echo.proto -o app/src/main/java/{}/generated. Error: {}",
                         package_path,
-                        package_name,
                         e
                     );
                 }

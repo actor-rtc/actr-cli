@@ -26,10 +26,6 @@ pub struct GenContext {
     pub overwrite_user_code: bool,
     pub no_format: bool,
     pub debug: bool,
-    /// Kotlin package name (for Kotlin language generation)
-    pub kotlin_package: Option<String>,
-    /// Scaffold type to generate (server, client, or both)
-    pub scaffold_type: ScaffoldType,
 }
 
 /// Interface for language-specific code generators
