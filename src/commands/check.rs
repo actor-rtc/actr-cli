@@ -111,16 +111,14 @@ impl CheckCommand {
         let mut uris = Vec::new();
 
         // Extract actr:// service URIs from dependencies
-        // Construct URI from ActrType: actr://<manufacturer>:<name>/
+        // Construct URI from ActrType: actr://<realm>:<manufacturer>+<name>@<version>/
         for dependency in &config.dependencies {
-            let uri = if dependency.actr_type.manufacturer.is_empty() {
-                format!("actr://{}/", dependency.actr_type.name)
-            } else {
-                format!(
-                    "actr://{}:{}/",
-                    dependency.actr_type.manufacturer, dependency.actr_type.name
-                )
-            };
+            let uri = format!(
+                "actr://{}:{}+{}@v1/",
+                dependency.realm.realm_id,
+                dependency.actr_type.manufacturer,
+                dependency.actr_type.name
+            );
             uris.push(uri);
             debug!(
                 "Added dependency URI: {} (alias: {})",

@@ -13,7 +13,7 @@ manufacturer = "acme"
 name = "echo-client-app"
 
 [dependencies]
-echo-server = { actr_type = "acme:EchoService" }
+echo = { actr_type = "acme+EchoService" }
 
 [system.signaling]
 # When running on a physical device, do not use localhost/127.0.0.1.
@@ -44,4 +44,4 @@ test = "xcodebuild test"
 
 [[acl.rules]]
 permission = "allow"
-types = ["acme:EchoService"]
+types = ["acme+EchoService"]

@@ -189,7 +189,7 @@ manufacturer = "acme"
 name = "example-service"
 
 [dependencies]
-# "acme:other-service" = {}
+# "acme+other-service" = {}
 
 [system.signaling]
 url = "ws://127.0.0.1:8080"

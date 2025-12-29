@@ -53,6 +53,10 @@ pub fn load(files: &mut HashMap<String, String>) -> Result<()> {
         files,
         "protos/echo.proto",
     )?;
+    files.insert(
+        "protos/client.proto".to_string(),
+        "syntax = \"proto3\";\n\npackage {{PROJECT_NAME_SNAKE}};\n".to_string(),
+    );
     ProjectTemplate::load_file(
         &fixtures_root.join("swift/Assets.xcassets/Contents.json"),
         files,

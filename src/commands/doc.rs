@@ -396,9 +396,9 @@ user_service = "proto/user.proto"
 # HTTP URL
 api_service = "https://example.com/api/service.proto"
 
-# Actor 注册表 
+# Actor 注册表
 [dependencies.payment]
-uri = "actr://payment-service/payment.proto"
+uri = "actr://101:acme+payment-service@v1/payment.proto"
 fingerprint = "sha256:a1b2c3d4..."</code></pre>
         </div>
     </div>

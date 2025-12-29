@@ -42,7 +42,7 @@ turn_urls = ["turn:{{SIGNALING_HOST}}:3478"]
 
 [[acl.rules]]
 permission = "allow"
-types = ["acme:EchoService"]
+types = ["acme+EchoService"]
 
 [scripts]
 dev = "./gradlew assembleDebug"

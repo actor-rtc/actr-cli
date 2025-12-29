@@ -11,7 +11,8 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 // 导入核心复用组件
 use actr_cli::core::{
-    ActrCliError, Command, CommandContext, ContainerBuilder, ErrorReporter, ServiceContainer,
+    ActrCliError, Command, CommandContext, ContainerBuilder, DefaultDependencyResolver,
+    ErrorReporter, NetworkServiceDiscovery, ServiceContainer, TomlConfigManager,
 };
 
 // 导入命令实现
@@ -127,14 +128,10 @@ async fn main() -> Result<()> {
 async fn build_container() -> Result<ServiceContainer> {
     let container = ContainerBuilder::new().config_path("Actr.toml").build()?;
 
-    // TODO: 在实际实现中，这里应该注册具体的组件实现
-    // 例如:
-    // container
-    //     .register_config_manager(Arc::new(TomlConfigManager::new("Actr.toml")))
-    //     .register_dependency_resolver(Arc::new(DefaultDependencyResolver::new()))
-    //     .register_service_discovery(Arc::new(NetworkServiceDiscovery::new()))
-    //     ...
-
+    let container = container
+        .register_config_manager(Arc::new(TomlConfigManager::new("Actr.toml")))
+        .register_dependency_resolver(Arc::new(DefaultDependencyResolver::new()))
+        .register_service_discovery(Arc::new(NetworkServiceDiscovery::new()));
     Ok(container)
 }
 
@@ -157,10 +154,11 @@ async fn execute_command(
             let command = InstallCommand::from_args(cmd);
 
             // 验证所需组件
-            {
-                let container = context.container.lock().unwrap();
-                container.validate(&command.required_components())?;
-            }
+            context
+                .container
+                .lock()
+                .unwrap()
+                .validate(&command.required_components())?;
 
             // 执行命令
             command.execute(context).await

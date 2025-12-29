@@ -2,10 +2,17 @@
 //!
 //! 定义了8个核心组件的trait接口，支持依赖注入和组合使用
 
+pub mod config_manager;
+pub mod dependency_resolver;
+pub mod service_discovery;
+pub use actr_config::Config;
+pub use config_manager::TomlConfigManager;
+pub use dependency_resolver::DefaultDependencyResolver;
+pub use service_discovery::NetworkServiceDiscovery;
+
 use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 // ============================================================================
@@ -158,10 +165,10 @@ impl ValidationReport {
 #[async_trait]
 pub trait ConfigManager: Send + Sync {
     /// 加载配置文件
-    async fn load_config(&self, path: &Path) -> Result<ActrConfig>;
+    async fn load_config(&self, path: &Path) -> Result<Config>;
 
     /// 保存配置文件
-    async fn save_config(&self, config: &ActrConfig, path: &Path) -> Result<()>;
+    async fn save_config(&self, config: &Config, path: &Path) -> Result<()>;
 
     /// 更新依赖配置
     async fn update_dependency(&self, spec: &DependencySpec) -> Result<()>;
@@ -182,49 +189,12 @@ pub trait ConfigManager: Send + Sync {
     async fn remove_backup(&self, backup: ConfigBackup) -> Result<()>;
 }
 
-/// 配置文件结构
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ActrConfig {
-    pub package: PackageConfig,
-    pub provides: Option<HashMap<String, String>>,
-    pub dependencies: Option<HashMap<String, DependencyConfig>>,
-    pub scripts: Option<HashMap<String, String>>,
-    pub routing: Option<HashMap<String, String>>,
-    pub signaling: Option<SignalingConfig>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageConfig {
     pub name: String,
     pub version: String,
     #[serde(rename = "type")]
     pub package_type: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum DependencyConfig {
-    Simple(String),
-    Complex {
-        uri: String,
-        #[serde(default)]
-        version: Option<String>,
-        #[serde(default)]
-        fingerprint: Option<String>,
-    },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SignalingConfig {
-    pub url: String,
-    pub auth: Option<AuthConfig>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuthConfig {
-    pub token: Option<String>,
-    pub username: Option<String>,
-    pub password: Option<String>,
 }
 
 /// 配置备份

@@ -268,31 +268,22 @@ impl ValidationPipeline {
     }
 
     /// 从配置中提取依赖规范
-    fn extract_dependency_specs(&self, config: &ActrConfig) -> Result<Vec<DependencySpec>> {
+    fn extract_dependency_specs(&self, config: &Config) -> Result<Vec<DependencySpec>> {
         let mut specs = Vec::new();
 
-        if let Some(dependencies) = &config.dependencies {
-            for (name, dep_config) in dependencies {
-                let spec = match dep_config {
-                    DependencyConfig::Simple(uri) => DependencySpec {
-                        name: name.clone(),
-                        uri: uri.clone(),
-                        version: None,
-                        fingerprint: None,
-                    },
-                    DependencyConfig::Complex {
-                        uri,
-                        version,
-                        fingerprint,
-                    } => DependencySpec {
-                        name: name.clone(),
-                        uri: uri.clone(),
-                        version: version.clone(),
-                        fingerprint: fingerprint.clone(),
-                    },
-                };
-                specs.push(spec);
-            }
+        for dependency in &config.dependencies {
+            let uri = format!(
+                "actr://{}:{}+{}@v1/",
+                dependency.realm.realm_id,
+                dependency.actr_type.manufacturer,
+                dependency.actr_type.name
+            );
+            specs.push(DependencySpec {
+                name: dependency.alias.clone(),
+                uri,
+                version: None,
+                fingerprint: dependency.fingerprint.clone(),
+            });
         }
 
         Ok(specs)

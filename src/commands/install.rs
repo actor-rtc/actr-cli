@@ -278,28 +278,19 @@ impl InstallCommand {
 
         let mut specs = Vec::new();
 
-        if let Some(dependencies) = &config.dependencies {
-            for (name, dep_config) in dependencies {
-                let spec = match dep_config {
-                    crate::core::DependencyConfig::Simple(uri) => DependencySpec {
-                        name: name.clone(),
-                        uri: uri.clone(),
-                        version: None,
-                        fingerprint: None,
-                    },
-                    crate::core::DependencyConfig::Complex {
-                        uri,
-                        version,
-                        fingerprint,
-                    } => DependencySpec {
-                        name: name.clone(),
-                        uri: uri.clone(),
-                        version: version.clone(),
-                        fingerprint: fingerprint.clone(),
-                    },
-                };
-                specs.push(spec);
-            }
+        for dependency in &config.dependencies {
+            let uri = format!(
+                "actr://{}:{}+{}@v1/",
+                dependency.realm.realm_id,
+                dependency.actr_type.manufacturer,
+                dependency.actr_type.name
+            );
+            specs.push(DependencySpec {
+                name: dependency.alias.clone(),
+                uri,
+                version: None,
+                fingerprint: dependency.fingerprint.clone(),
+            });
         }
 
         Ok(specs)
