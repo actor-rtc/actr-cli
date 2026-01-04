@@ -70,7 +70,7 @@ impl KotlinGenerator {
             if let Some(pos) = output_str.find(marker) {
                 let after_marker = &output_str[pos + marker.len()..];
                 // Convert path to package name (replace / with .)
-                let package = after_marker.replace('/', ".").replace('\\', ".");
+                let package = after_marker.replace(['/', '\\'], ".");
                 debug!(
                     "get_kotlin_package: found marker {}, package = {}",
                     marker, package

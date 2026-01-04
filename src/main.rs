@@ -126,10 +126,21 @@ async fn main() -> Result<()> {
 
 /// 构建服务容器
 async fn build_container() -> Result<ServiceContainer> {
-    let container = ContainerBuilder::new().config_path("Actr.toml").build()?;
+    let config_path = std::path::Path::new("Actr.toml");
+    let mut builder = ContainerBuilder::new();
+
+    if config_path.exists() {
+        builder = builder.config_path(config_path);
+    }
+
+    let mut container = builder.build()?;
+
+    if config_path.exists() {
+        container =
+            container.register_config_manager(Arc::new(TomlConfigManager::new(config_path)));
+    }
 
     let container = container
-        .register_config_manager(Arc::new(TomlConfigManager::new("Actr.toml")))
         .register_dependency_resolver(Arc::new(DefaultDependencyResolver::new()))
         .register_service_discovery(Arc::new(NetworkServiceDiscovery::new()));
     Ok(container)
