@@ -10,12 +10,6 @@ class Actr < Formula
       url "https://github.com/actor-rtc/actr-cli/releases/download/v0.1.5/actr-0.1.5-aarch64-apple-darwin.tar.gz"
       sha256 "REPLACE_ME"
     end
-
-    on_intel do
-      # TARGET: macos-x86_64
-      url "https://github.com/actor-rtc/actr-cli/releases/download/v0.1.5/actr-0.1.5-x86_64-apple-darwin.tar.gz"
-      sha256 "REPLACE_ME"
-    end
   end
 
   on_linux do

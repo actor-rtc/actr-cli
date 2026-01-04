@@ -52,7 +52,6 @@ def main() -> int:
 
     targets = {
         "macos-arm64": "aarch64-apple-darwin",
-        "macos-x86_64": "x86_64-apple-darwin",
         "linux-x86_64": "x86_64-unknown-linux-gnu",
     }
 
@@ -67,7 +66,7 @@ def main() -> int:
 
     text, count = re.subn(
         r'^(\s*version\s+")([^"]+)(")',
-        rf'\1{version}\3',
+        rf"\1{version}\3",
         text,
         flags=re.MULTILINE,
     )
@@ -79,12 +78,6 @@ def main() -> int:
         "# TARGET: macos-arm64",
         assets["macos-arm64"]["url"],
         assets["macos-arm64"]["sha"],
-    )
-    text = replace_after_marker(
-        text,
-        "# TARGET: macos-x86_64",
-        assets["macos-x86_64"]["url"],
-        assets["macos-x86_64"]["sha"],
     )
     text = replace_after_marker(
         text,
