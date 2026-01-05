@@ -12,6 +12,12 @@ categories = ["command-line-utilities", "development-tools"]
 name = "actr"
 path = "src/main.rs"
 
+[patch.crates-io]
+actr-protocol = { path = "../actr/crates/protocol" }
+actr-config = { path = "../actr/crates/config" }
+actr-version = { path = "../actr/crates/version" }
+actr-framework-protoc-codegen = { path = "../actr/crates/framework-protoc-codegen" }
+
 [dependencies]
 # Actor-RTC crates - only what CLI actually needs
 actr-config = "0.1.7"
@@ -21,6 +27,7 @@ actr-framework-protoc-codegen = "0.1.6"
 
 # Command line interface
 clap = { version = "4.5.53", features = ["derive", "cargo"] }
+dialoguer = "0.12.0"
 
 # Error handling
 anyhow = "1.0"
@@ -75,7 +82,9 @@ prost-types = "0.14.1"
 quote = "1.0"
 proc-macro2 = "1.0"
 bytes = "1.0"
-heck = "0.4"        # for case conversion
+heck = "0.5.0"               # for case conversion
+tokio-tungstenite = "0.28.0"
+futures-util = "0.3.31"
 
 [dev-dependencies]
 tokio-test = "0.4"

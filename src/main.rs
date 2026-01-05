@@ -11,7 +11,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 // 导入核心复用组件
 use actr_cli::core::{
-    ActrCliError, Command, CommandContext, ContainerBuilder, DefaultDependencyResolver,
+    ActrCliError, Command, CommandContext, ConsoleUI, ContainerBuilder, DefaultDependencyResolver,
     ErrorReporter, NetworkServiceDiscovery, ServiceContainer, TomlConfigManager,
 };
 
@@ -128,6 +128,7 @@ async fn main() -> Result<()> {
 async fn build_container() -> Result<ServiceContainer> {
     let config_path = std::path::Path::new("Actr.toml");
     let mut builder = ContainerBuilder::new();
+    let mut config_manager = None;
 
     if config_path.exists() {
         builder = builder.config_path(config_path);
@@ -135,14 +136,21 @@ async fn build_container() -> Result<ServiceContainer> {
 
     let mut container = builder.build()?;
 
+    // Register UI component (always available)
+    container = container.register_user_interface(Arc::new(ConsoleUI::new()));
+
     if config_path.exists() {
-        container =
-            container.register_config_manager(Arc::new(TomlConfigManager::new(config_path)));
+        let manager = Arc::new(TomlConfigManager::new(config_path));
+        container = container.register_config_manager(manager.clone());
+        config_manager = Some(manager);
     }
 
-    let container = container
-        .register_dependency_resolver(Arc::new(DefaultDependencyResolver::new()))
-        .register_service_discovery(Arc::new(NetworkServiceDiscovery::new()));
+    let mut container =
+        container.register_dependency_resolver(Arc::new(DefaultDependencyResolver::new()));
+    if let Some(manager) = config_manager {
+        container =
+            container.register_service_discovery(Arc::new(NetworkServiceDiscovery::new(manager)));
+    }
     Ok(container)
 }
 

@@ -1,145 +1,312 @@
-use anyhow::{Result, anyhow};
+use actr_protocol::{
+    AIdCredential, ActrId, ActrToSignaling, ActrType, DiscoveryRequest, ErrorResponse,
+    PeerToSignaling, Realm, RegisterRequest, SignalingEnvelope, actr_to_signaling,
+    discovery_response, peer_to_signaling, register_response, signaling_envelope,
+    signaling_to_actr,
+};
+use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
-use heck::ToUpperCamelCase;
-use sha2::{Digest, Sha256};
-use std::path::PathBuf;
-use std::time::SystemTime;
+use futures_util::{SinkExt, StreamExt};
+use prost::Message;
+use prost_types::Timestamp;
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 
 use crate::core::{
-    AvailabilityStatus, HealthStatus, MethodDefinition, ProtoFile, ServiceDefinition,
-    ServiceDetails, ServiceDiscovery, ServiceFilter, ServiceInfo,
+    AvailabilityStatus, ConfigManager, HealthStatus, ProtoFile, ServiceDetails, ServiceDiscovery,
+    ServiceFilter, ServiceInfo,
 };
 
+type SignalingSocket =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
 #[derive(Clone)]
-struct CatalogEntry {
-    info: ServiceInfo,
-    tags: Vec<String>,
-    dependencies: Vec<String>,
-    proto_files: Vec<ProtoFile>,
+struct SignalingSession {
+    actr_id: ActrId,
+    credential: AIdCredential,
+}
+
+struct SignalingClient {
+    signaling_url: String,
+    actr_type: ActrType,
+    realm: Realm,
+}
+
+impl SignalingClient {
+    fn new(signaling_url: String, actr_type: ActrType, realm: Realm) -> Self {
+        Self {
+            signaling_url,
+            actr_type,
+            realm,
+        }
+    }
+
+    async fn discover_entries(
+        &self,
+        filter: Option<&ServiceFilter>,
+    ) -> Result<Vec<discovery_response::TypeEntry>> {
+        let (mut socket, _) = connect_async(self.signaling_url.as_str())
+            .await
+            .with_context(|| format!("Failed to connect to signaling: {}", self.signaling_url))?;
+
+        let session = self.register(&mut socket).await?;
+
+        let request = self.build_discovery_request(filter);
+        let payload = actr_to_signaling::Payload::DiscoveryRequest(request);
+        let envelope =
+            Self::build_envelope(signaling_envelope::Flow::ActrToServer(ActrToSignaling {
+                source: session.actr_id.clone(),
+                credential: session.credential.clone(),
+                payload: Some(payload),
+            }))?;
+
+        Self::send_envelope(&mut socket, envelope).await?;
+        Self::receive_discovery_response(&mut socket).await
+    }
+
+    fn build_discovery_request(&self, filter: Option<&ServiceFilter>) -> DiscoveryRequest {
+        let manufacturer = filter
+            .and_then(|f| f.name_pattern.as_deref())
+            .and_then(Self::extract_manufacturer)
+            .or_else(|| {
+                if self.actr_type.manufacturer.trim().is_empty() {
+                    None
+                } else {
+                    Some(self.actr_type.manufacturer.clone())
+                }
+            });
+
+        DiscoveryRequest {
+            manufacturer,
+            limit: None,
+        }
+    }
+
+    fn extract_manufacturer(pattern: &str) -> Option<String> {
+        if let Some((manufacturer, _)) = pattern.split_once('+') {
+            if !manufacturer.contains('*') && !manufacturer.trim().is_empty() {
+                return Some(manufacturer.trim().to_string());
+            }
+        }
+        None
+    }
+
+    async fn register(&self, socket: &mut SignalingSocket) -> Result<SignalingSession> {
+        let register_request = RegisterRequest {
+            actr_type: self.actr_type.clone(),
+            realm: self.realm.clone(),
+            service_spec: None,
+            acl: None,
+        };
+
+        let envelope =
+            Self::build_envelope(signaling_envelope::Flow::PeerToServer(PeerToSignaling {
+                payload: Some(peer_to_signaling::Payload::RegisterRequest(
+                    register_request,
+                )),
+            }))?;
+
+        Self::send_envelope(socket, envelope).await?;
+
+        loop {
+            let envelope = Self::read_envelope(socket).await?;
+            match envelope.flow {
+                Some(signaling_envelope::Flow::ServerToActr(server)) => match server.payload {
+                    Some(signaling_to_actr::Payload::RegisterResponse(response)) => {
+                        return Self::handle_register_response(response);
+                    }
+                    Some(signaling_to_actr::Payload::Error(error)) => {
+                        return Err(Self::as_error("Register failed", &error));
+                    }
+                    _ => {}
+                },
+                Some(signaling_envelope::Flow::EnvelopeError(error)) => {
+                    return Err(Self::as_error("Register failed", &error));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn handle_register_response(
+        response: actr_protocol::RegisterResponse,
+    ) -> Result<SignalingSession> {
+        match response.result {
+            Some(register_response::Result::Success(success)) => Ok(SignalingSession {
+                actr_id: success.actr_id,
+                credential: success.credential,
+            }),
+            Some(register_response::Result::Error(error)) => {
+                Err(Self::as_error("Register failed", &error))
+            }
+            None => Err(anyhow!("Register response is missing result")),
+        }
+    }
+
+    async fn receive_discovery_response(
+        socket: &mut SignalingSocket,
+    ) -> Result<Vec<discovery_response::TypeEntry>> {
+        loop {
+            let envelope = Self::read_envelope(socket).await?;
+            match envelope.flow {
+                Some(signaling_envelope::Flow::ServerToActr(server)) => match server.payload {
+                    Some(signaling_to_actr::Payload::DiscoveryResponse(response)) => {
+                        return Self::handle_discovery_response(response);
+                    }
+                    Some(signaling_to_actr::Payload::Error(error)) => {
+                        return Err(Self::as_error("Discovery failed", &error));
+                    }
+                    _ => {}
+                },
+                Some(signaling_envelope::Flow::EnvelopeError(error)) => {
+                    return Err(Self::as_error("Discovery failed", &error));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn handle_discovery_response(
+        response: actr_protocol::DiscoveryResponse,
+    ) -> Result<Vec<discovery_response::TypeEntry>> {
+        match response.result {
+            Some(discovery_response::Result::Success(success)) => Ok(success.entries),
+            Some(discovery_response::Result::Error(error)) => {
+                Err(Self::as_error("Discovery failed", &error))
+            }
+            None => Err(anyhow!("Discovery response is missing result")),
+        }
+    }
+
+    fn as_error(context: &str, error: &ErrorResponse) -> anyhow::Error {
+        anyhow!("{context}: {} ({})", error.message, error.code)
+    }
+
+    async fn send_envelope(
+        socket: &mut SignalingSocket,
+        envelope: SignalingEnvelope,
+    ) -> Result<()> {
+        let mut buf = Vec::new();
+        envelope
+            .encode(&mut buf)
+            .context("Failed to encode signaling envelope")?;
+        socket
+            .send(WsMessage::Binary(buf.into()))
+            .await
+            .context("Failed to send signaling envelope")?;
+        Ok(())
+    }
+
+    async fn read_envelope(socket: &mut SignalingSocket) -> Result<SignalingEnvelope> {
+        while let Some(message) = socket.next().await {
+            match message.context("Failed to read signaling response")? {
+                WsMessage::Binary(bytes) => {
+                    return SignalingEnvelope::decode(bytes)
+                        .context("Failed to decode signaling envelope");
+                }
+                WsMessage::Close(_) => {
+                    return Err(anyhow!("Signaling connection closed"));
+                }
+                WsMessage::Ping(_) | WsMessage::Pong(_) => {}
+                WsMessage::Text(text) => {
+                    return Err(anyhow!("Unexpected text message from signaling: {text}"));
+                }
+                WsMessage::Frame(_) => {}
+            }
+        }
+
+        Err(anyhow!("Signaling connection closed"))
+    }
+
+    fn build_envelope(flow: signaling_envelope::Flow) -> Result<SignalingEnvelope> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .context("System time is before UNIX_EPOCH")?;
+        let timestamp = Timestamp {
+            seconds: now.as_secs() as i64,
+            nanos: now.subsec_nanos() as i32,
+        };
+        let envelope_id = format!("cli-{}-{}", now.as_secs(), now.subsec_nanos());
+
+        Ok(SignalingEnvelope {
+            envelope_version: 1,
+            envelope_id,
+            reply_for: None,
+            timestamp,
+            traceparent: None,
+            tracestate: None,
+            flow: Some(flow),
+        })
+    }
 }
 
 pub struct NetworkServiceDiscovery {
-    catalog: Vec<CatalogEntry>,
+    config_manager: Arc<dyn ConfigManager>,
 }
 
 impl NetworkServiceDiscovery {
-    pub fn new() -> Self {
-        let catalog = vec![
-            Self::build_entry(
-                "user-service",
-                "1.0.0",
-                "User profile and authentication service",
-                &["user", "auth"],
-                &[],
-            ),
-            Self::build_entry(
-                "order-service",
-                "1.2.0",
-                "Order management service",
-                &["order", "workflow"],
-                &["actr://user-service/"],
-            ),
-            Self::build_entry(
-                "payment-service",
-                "2.0.0",
-                "Payments and billing service",
-                &["payment", "billing"],
-                &["actr://order-service/"],
-            ),
-        ];
-
-        Self { catalog }
+    pub fn new(config_manager: Arc<dyn ConfigManager>) -> Self {
+        Self { config_manager }
     }
 
-    fn build_entry(
-        name: &str,
-        version: &str,
-        description: &str,
-        tags: &[&str],
-        dependencies: &[&str],
-    ) -> CatalogEntry {
-        let methods = Self::build_methods(name);
-        let info = ServiceInfo {
-            name: name.to_string(),
-            uri: format!("actr://{name}/"),
-            version: version.to_string(),
-            fingerprint: Self::fingerprint_for(name),
-            description: Some(description.to_string()),
-            methods: methods.clone(),
-        };
-        let proto_files = vec![Self::build_proto_file(name, &methods)];
-
-        CatalogEntry {
-            info,
-            tags: tags.iter().map(|tag| (*tag).to_string()).collect(),
-            dependencies: dependencies.iter().map(|dep| (*dep).to_string()).collect(),
-            proto_files,
-        }
-    }
-
-    fn build_methods(name: &str) -> Vec<MethodDefinition> {
-        let service_name = name.to_upper_camel_case();
-        vec![
-            MethodDefinition {
-                name: format!("Get{service_name}"),
-                input_type: format!("Get{service_name}Request"),
-                output_type: format!("Get{service_name}Response"),
-            },
-            MethodDefinition {
-                name: format!("List{service_name}"),
-                input_type: format!("List{service_name}Request"),
-                output_type: format!("List{service_name}Response"),
-            },
-        ]
-    }
-
-    fn build_proto_file(name: &str, methods: &[MethodDefinition]) -> ProtoFile {
-        let service_name = format!("{}Service", name.to_upper_camel_case());
-        let package_name = name.replace('-', "_");
-        let mut service_methods = String::new();
-        let mut message_defs = String::new();
-
-        for method in methods {
-            service_methods.push_str(&format!(
-                "  rpc {} ({}) returns ({});\n",
-                method.name, method.input_type, method.output_type
+    async fn load_config(&self) -> Result<crate::core::Config> {
+        let path = self.config_manager.get_project_root().join("Actr.toml");
+        if !path.exists() {
+            return Err(anyhow!(
+                "Actr.toml not found in current directory. Run 'actr init' first or ensure you are in an Actor-RTC project."
             ));
-            message_defs.push_str(&format!("message {} {{}}\n", method.input_type));
-            message_defs.push_str(&format!("message {} {{}}\n", method.output_type));
         }
+        self.config_manager.load_config(&path).await
+    }
 
-        let content = format!(
-            "syntax = \"proto3\";\n\npackage {package_name};\n\nservice {service_name} {{\n{service_methods}}}\n\n{message_defs}",
+    async fn fetch_entries(
+        &self,
+        filter: Option<&ServiceFilter>,
+    ) -> Result<Vec<discovery_response::TypeEntry>> {
+        let config = self.load_config().await?;
+        let client = SignalingClient::new(
+            config.signaling_url.to_string(),
+            config.package.actr_type.clone(),
+            config.realm.clone(),
         );
+        client.discover_entries(filter).await
+    }
 
-        ProtoFile {
-            name: format!("{name}.proto"),
-            path: PathBuf::from(format!("proto/{name}.proto")),
-            content,
-            services: vec![ServiceDefinition {
-                name: service_name,
-                methods: methods.to_vec(),
-            }],
+    fn entry_to_service_info(entry: &discovery_response::TypeEntry) -> ServiceInfo {
+        let uri = Self::build_actr_uri(&entry.actr_type);
+        ServiceInfo {
+            name: entry.actr_type.name.clone(),
+            uri,
+            version: Self::select_version(entry),
+            fingerprint: entry.service_fingerprint.clone(),
+            description: entry.description.clone(),
+            methods: Vec::new(),
         }
     }
 
-    fn fingerprint_for(name: &str) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(name.as_bytes());
-        let digest = hasher.finalize();
-        let hex = digest
+    fn build_actr_uri(actr_type: &ActrType) -> String {
+        if actr_type.manufacturer.trim().is_empty() {
+            format!("actr://{}/", actr_type.name)
+        } else {
+            format!("actr://{}+{}/", actr_type.manufacturer, actr_type.name)
+        }
+    }
+
+    fn select_version(entry: &discovery_response::TypeEntry) -> String {
+        entry
+            .tags
             .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<String>();
-        format!("sha256:{hex}")
+            .find(|tag| tag.as_str() == "latest")
+            .cloned()
+            .or_else(|| entry.tags.first().cloned())
+            .unwrap_or_else(|| "unknown".to_string())
     }
 
-    fn parse_actr_uri(&self, uri: &str) -> Result<String> {
-        if !uri.starts_with("actr://") {
-            return Err(anyhow!("Invalid actr:// URI: {uri}"));
-        }
-
-        let without_scheme = &uri["actr://".len()..];
+    fn parse_actr_uri(&self, uri: &str) -> Result<(Option<String>, String)> {
+        let without_scheme = uri
+            .strip_prefix("actr://")
+            .ok_or_else(|| anyhow!("Invalid actr:// URI: {uri}"))?;
         let name_end = without_scheme
             .find(|c| ['/', '?'].contains(&c))
             .unwrap_or(without_scheme.len());
@@ -148,18 +315,34 @@ impl NetworkServiceDiscovery {
             return Err(anyhow!("Invalid actr:// URI: {uri}"));
         }
 
-        Ok(name.to_string())
+        if let Some((manufacturer, service_name)) = name.split_once('+') {
+            let manufacturer = manufacturer.trim();
+            let service_name = service_name.trim();
+            if manufacturer.is_empty() || service_name.is_empty() {
+                return Err(anyhow!("Invalid actr:// URI: {uri}"));
+            }
+            Ok((Some(manufacturer.to_string()), service_name.to_string()))
+        } else {
+            Ok((None, name.to_string()))
+        }
     }
 
-    fn matches_filter(entry: &CatalogEntry, filter: &ServiceFilter) -> bool {
-        if let Some(pattern) = &filter.name_pattern
-            && !Self::matches_pattern(&entry.info.name, pattern)
-        {
-            return false;
+    fn matches_filter(entry: &discovery_response::TypeEntry, filter: &ServiceFilter) -> bool {
+        if let Some(pattern) = &filter.name_pattern {
+            let full_name = format!("{}+{}", entry.actr_type.manufacturer, entry.actr_type.name);
+            let matches = if pattern.contains('+') {
+                Self::matches_pattern(&full_name, pattern)
+            } else {
+                Self::matches_pattern(&entry.actr_type.name, pattern)
+            };
+            if !matches {
+                return false;
+            }
         }
 
         if let Some(version_range) = &filter.version_range
-            && entry.info.version != *version_range
+            && Self::select_version(entry) != *version_range
+            && !entry.tags.iter().any(|tag| tag == version_range)
         {
             return false;
         }
@@ -227,53 +410,52 @@ impl NetworkServiceDiscovery {
 
         true
     }
-
-    fn find_entry(&self, name: &str) -> Option<&CatalogEntry> {
-        self.catalog.iter().find(|entry| entry.info.name == name)
-    }
-}
-
-impl Default for NetworkServiceDiscovery {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 #[async_trait]
 impl ServiceDiscovery for NetworkServiceDiscovery {
     async fn discover_services(&self, filter: Option<&ServiceFilter>) -> Result<Vec<ServiceInfo>> {
-        let services = match filter {
-            Some(filter) => self
-                .catalog
-                .iter()
-                .filter(|entry| Self::matches_filter(entry, filter))
-                .map(|entry| entry.info.clone())
-                .collect(),
-            None => self
-                .catalog
-                .iter()
-                .map(|entry| entry.info.clone())
-                .collect(),
-        };
+        let entries = self.fetch_entries(filter).await?;
+        let services = entries
+            .into_iter()
+            .filter(|entry| match filter {
+                Some(filter) => Self::matches_filter(entry, filter),
+                None => true,
+            })
+            .map(|entry| Self::entry_to_service_info(&entry))
+            .collect();
         Ok(services)
     }
 
     async fn get_service_details(&self, uri: &str) -> Result<ServiceDetails> {
-        let name = self.parse_actr_uri(uri)?;
-        let entry = self
-            .find_entry(&name)
-            .ok_or_else(|| anyhow!("Service not found: {name}"))?;
+        let (manufacturer, name) = self.parse_actr_uri(uri)?;
+        let entries = self.fetch_entries(None).await?;
+        let entry = entries.into_iter().find(|entry| {
+            entry.actr_type.name == name
+                && manufacturer
+                    .as_ref()
+                    .map_or(true, |m| entry.actr_type.manufacturer == *m)
+        });
+
+        let entry = entry.ok_or_else(|| anyhow!("Service not found: {uri}"))?;
+        let info = Self::entry_to_service_info(&entry);
 
         Ok(ServiceDetails {
-            info: entry.info.clone(),
-            proto_files: entry.proto_files.clone(),
-            dependencies: entry.dependencies.clone(),
+            info,
+            proto_files: Vec::new(),
+            dependencies: Vec::new(),
         })
     }
 
     async fn check_service_availability(&self, uri: &str) -> Result<AvailabilityStatus> {
-        let name = self.parse_actr_uri(uri)?;
-        let available = self.find_entry(&name).is_some();
+        let (manufacturer, name) = self.parse_actr_uri(uri)?;
+        let entries = self.fetch_entries(None).await?;
+        let available = entries.iter().any(|entry| {
+            entry.actr_type.name == name
+                && manufacturer
+                    .as_ref()
+                    .map_or(true, |m| entry.actr_type.manufacturer == *m)
+        });
 
         Ok(AvailabilityStatus {
             is_available: available,
@@ -287,10 +469,9 @@ impl ServiceDiscovery for NetworkServiceDiscovery {
     }
 
     async fn get_service_proto(&self, uri: &str) -> Result<Vec<ProtoFile>> {
-        let name = self.parse_actr_uri(uri)?;
-        let entry = self
-            .find_entry(&name)
-            .ok_or_else(|| anyhow!("Service not found: {name}"))?;
-        Ok(entry.proto_files.clone())
+        let _ = self.parse_actr_uri(uri)?;
+        Err(anyhow!(
+            "Proto export is not available via signaling discovery yet"
+        ))
     }
 }

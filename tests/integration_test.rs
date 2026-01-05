@@ -28,7 +28,7 @@ name = "test-service"
 url = "ws://localhost:8080/"
 
 [system.deployment]
-realm = 1001
+realm_id = 1001
 
 [system.discovery]
 visible = true

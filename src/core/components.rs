@@ -5,10 +5,12 @@
 pub mod config_manager;
 pub mod dependency_resolver;
 pub mod service_discovery;
+pub mod user_interface;
 pub use actr_config::Config;
 pub use config_manager::TomlConfigManager;
 pub use dependency_resolver::DefaultDependencyResolver;
 pub use service_discovery::NetworkServiceDiscovery;
+pub use user_interface::ConsoleUI;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -424,19 +426,8 @@ pub trait UserInterface: Send + Sync {
     /// 确认操作
     async fn confirm(&self, message: &str) -> Result<bool>;
 
-    /// 从服务列表中选择
-    async fn select_service_from_list(
-        &self,
-        items: &[ServiceInfo],
-        formatter: fn(&ServiceInfo) -> String,
-    ) -> Result<usize>;
-
-    /// 从字符串列表中选择
-    async fn select_string_from_list(
-        &self,
-        items: &[String],
-        formatter: fn(&String) -> String,
-    ) -> Result<usize>;
+    /// 从列表中选择一项
+    async fn select_from_list(&self, items: &[String], prompt: &str) -> Result<usize>;
 
     /// 显示服务表格
     async fn display_service_table(

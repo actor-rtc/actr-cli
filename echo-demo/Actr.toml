@@ -1,0 +1,37 @@
+edition = 1
+exports = []
+
+[package]
+name = "echo"
+version = "0.1.0"
+description = "An Actor-RTC client"
+authors = []
+
+[package.actr_type]
+manufacturer = "acme"
+name = "echo-client-app"
+
+[dependencies]
+
+[system.signaling]
+url = "ws://localhost:8081/signaling/ws"
+
+[system.deployment]
+realm_id = 1001
+
+[system.discovery]
+visible = true
+
+
+# ACL configuration - allow echo server
+[acl]
+
+[[acl.rules]]
+permission = "allow"
+# Allow server with actr_type = "acme+EchoService"
+types = ["acme+EchoService"]
+
+
+[scripts]
+dev = "cargo run"
+test = "cargo test"

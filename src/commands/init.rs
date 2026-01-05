@@ -181,7 +181,7 @@ authors = []
 url = "{signaling_url}"
 
 [system.deployment]
-realm = 1001
+realm_id = 1001
 
 [system.discovery]
 visible = true
