@@ -1,4 +1,4 @@
-use actr_config::ConfigParser;
+use actr_config::{Config, ConfigParser};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
@@ -6,7 +6,7 @@ use std::time::SystemTime;
 use tokio::fs;
 use toml::map::Map;
 
-use crate::core::{Config, ConfigBackup, ConfigManager, ConfigValidation, DependencySpec};
+use crate::core::{ConfigBackup, ConfigManager, ConfigValidation, DependencySpec};
 
 pub struct TomlConfigManager {
     config_path: PathBuf,

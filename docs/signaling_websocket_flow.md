@@ -8,26 +8,36 @@ ACTR CLI 通过 WebSocket 连接到信令服务器，执行服务注册和服务
 
 ## 核心组件
 
-### SignalingClient
+### NetworkServiceDiscovery
 
-负责与信令服务器建立连接和通信的客户端：
+Single component responsible for signaling connection management and discovery:
 
 ```rust
-struct SignalingClient {
-    signaling_url: String,  // WebSocket 服务器地址
-    actr_type: ActrType,    // ACTR 类型信息
-    realm: Realm,           // 领域信息
+pub struct NetworkServiceDiscovery {
+    config: actr_config::Config,
+    state: Mutex<Option<SignalingState>>,
 }
 ```
 
 ### SignalingSession
 
-注册成功后获得的会话信息：
+Session data returned after a successful register:
 
 ```rust
 struct SignalingSession {
-    actr_id: ActrId,           // ACTR ID
-    credential: AIdCredential,  // 认证凭证
+    actr_id: ActrId,
+    credential: AIdCredential,
+}
+```
+
+### SignalingState
+
+Cached signaling state stored in the mutex:
+
+```rust
+struct SignalingState {
+    socket: SignalingSocket,
+    session: SignalingSession,
 }
 ```
 
@@ -117,10 +127,11 @@ message DiscoveryOk {
 
 message TypeEntry {
   ActrType actr_type = 1;             // ACTR 类型
-  optional string description = 2;    // 描述（可选）
-  string service_fingerprint = 3;     // 服务指纹（必需）
-  optional int64 published_at = 4;     // 发布时间戳（可选）
-  repeated string tags = 5;            // 标签列表（如 "latest", "stable"）
+  string name = 2;                    // 服务名称（必需）
+  optional string description = 3;    // 描述（可选）
+  string service_fingerprint = 4;     // 服务指纹（必需）
+  optional int64 published_at = 5;     // 发布时间戳（可选）
+  repeated string tags = 6;            // 标签列表（如 "latest", "stable"）
 }
 ```
 
@@ -238,23 +249,37 @@ flowchart TD
 
 ### 1. 建立连接
 
-```45:51:src/core/components/service_discovery.rs
-    async fn discover_entries(
+```104:119:src/core/components/service_discovery.rs
+    async fn connect_and_register(
         &self,
-        filter: Option<&ServiceFilter>,
-    ) -> Result<Vec<discovery_response::TypeEntry>> {
-        let (mut socket, _) = connect_async(self.signaling_url.as_str())
+        config: &actr_config::Config,
+    ) -> Result<SignalingState> {
+        let signaling_url = config.signaling_url.as_str();
+        let (mut socket, _) = connect_async(signaling_url)
             .await
-            .with_context(|| format!("Failed to connect to signaling: {}", self.signaling_url))?;
+            .with_context(|| format!("Failed to connect to signaling: {signaling_url}"))?;
+        let session = self
+            .register(&mut socket, &config.package.actr_type, &config.realm)
+            .await?;
+        Ok(SignalingState {
+            socket,
+            session,
+        })
+    }
 ```
 
 ### 2. 注册流程
 
-```95:130:src/core/components/service_discovery.rs
-    async fn register(&self, socket: &mut SignalingSocket) -> Result<SignalingSession> {
+```151:191:src/core/components/service_discovery.rs
+    async fn register(
+        &self,
+        socket: &mut SignalingSocket,
+        actr_type: &ActrType,
+        realm: &Realm,
+    ) -> Result<SignalingSession> {
         let register_request = RegisterRequest {
-            actr_type: self.actr_type.clone(),
-            realm: self.realm.clone(),
+            actr_type: actr_type.clone(),
+            realm: realm.clone(),
             service_spec: None,
             acl: None,
         };
@@ -291,34 +316,71 @@ flowchart TD
 
 ### 3. 服务发现流程
 
-```45:66:src/core/components/service_discovery.rs
+```76:101:src/core/components/service_discovery.rs
     async fn discover_entries(
         &self,
         filter: Option<&ServiceFilter>,
     ) -> Result<Vec<discovery_response::TypeEntry>> {
-        let (mut socket, _) = connect_async(self.signaling_url.as_str())
-            .await
-            .with_context(|| format!("Failed to connect to signaling: {}", self.signaling_url))?;
+        self.ensure_connected().await?;
+        let mut state_guard = self.state.lock().await;
+        let state = state_guard
+            .as_mut()
+            .context("Signaling state not initialized")?;
+        let manufacturer = filter
+            .and_then(|f| f.name_pattern.as_deref())
+            .and_then(Self::extract_manufacturer)
+            .or_else(|| {
+                let m = &self.config.package.actr_type.manufacturer;
+                if m.trim().is_empty() {
+                    None
+                } else {
+                    Some(m.clone())
+                }
+            });
 
-        let session = self.register(&mut socket).await?;
-
-        let request = self.build_discovery_request(filter);
+        let request = DiscoveryRequest {
+            manufacturer,
+            limit: None,
+        };
         let payload = actr_to_signaling::Payload::DiscoveryRequest(request);
         let envelope =
             Self::build_envelope(signaling_envelope::Flow::ActrToServer(ActrToSignaling {
-                source: session.actr_id.clone(),
-                credential: session.credential.clone(),
+                source: state.session.actr_id.clone(),
+                credential: state.session.credential.clone(),
                 payload: Some(payload),
             }))?;
 
-        Self::send_envelope(&mut socket, envelope).await?;
-        Self::receive_discovery_response(&mut socket).await
+        let result = match Self::send_envelope(&mut state.socket, envelope).await {
+            Ok(()) => loop {
+                let envelope = Self::read_envelope(&mut state.socket).await?;
+                match envelope.flow {
+                    Some(signaling_envelope::Flow::ServerToActr(server)) => match server.payload {
+                        Some(signaling_to_actr::Payload::DiscoveryResponse(response)) => {
+                            break Self::handle_discovery_response(response);
+                        }
+                        Some(signaling_to_actr::Payload::Error(error)) => {
+                            break Err(Self::as_error("Discovery failed", &error));
+                        }
+                        _ => {}
+                    },
+                    Some(signaling_envelope::Flow::EnvelopeError(error)) => {
+                        break Err(Self::as_error("Discovery failed", &error));
+                    }
+                    _ => {}
+                }
+            },
+            Err(err) => Err(err),
+        };
+        if result.is_err() {
+            *state_guard = None;
+        }
+        result
     }
 ```
 
 ### 4. 消息发送
 
-```186:199:src/core/components/service_discovery.rs
+```245:257:src/core/components/service_discovery.rs
     async fn send_envelope(
         socket: &mut SignalingSocket,
         envelope: SignalingEnvelope,
@@ -337,7 +399,7 @@ flowchart TD
 
 ### 5. 消息接收
 
-```201:220:src/core/components/service_discovery.rs
+```260:279:src/core/components/service_discovery.rs
     async fn read_envelope(socket: &mut SignalingSocket) -> Result<SignalingEnvelope> {
         while let Some(message) = socket.next().await {
             match message.context("Failed to read signaling response")? {
@@ -362,7 +424,7 @@ flowchart TD
 
 ### 6. 构建信封
 
-```222:241:src/core/components/service_discovery.rs
+```281:299:src/core/components/service_discovery.rs
     fn build_envelope(flow: signaling_envelope::Flow) -> Result<SignalingEnvelope> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -398,7 +460,7 @@ flowchart TD
 
 ### 错误处理流程
 
-```132:145:src/core/components/service_discovery.rs
+```191:203:src/core/components/service_discovery.rs
     fn handle_register_response(
         response: actr_protocol::RegisterResponse,
     ) -> Result<SignalingSession> {
@@ -415,7 +477,7 @@ flowchart TD
     }
 ```
 
-```170:180:src/core/components/service_discovery.rs
+```229:237:src/core/components/service_discovery.rs
     fn handle_discovery_response(
         response: actr_protocol::DiscoveryResponse,
     ) -> Result<Vec<discovery_response::TypeEntry>> {
@@ -429,30 +491,31 @@ flowchart TD
     }
 ```
 
-## 关键要点
+## Key Points
 
-1. **连接管理**: 每次服务发现操作都会建立新的 WebSocket 连接，操作完成后连接关闭
-2. **消息格式**: 所有消息使用 Protobuf 二进制格式，通过 `SignalingEnvelope` 封装
-3. **认证流程**: 必须先注册获得 `actr_id` 和 `credential`，才能进行服务发现
-4. **消息流向**: 使用 `Flow` 类型区分不同的消息流向和类型
-5. **错误处理**: 通过循环读取消息，直到收到预期的响应或错误
-6. **时间戳**: 每个信封都包含时间戳，用于追踪和调试
+1. **Connection management**: `NetworkServiceDiscovery` caches a single WebSocket session in
+   `state`; errors clear the cache and the next request reconnects.
+2. **Message format**: All messages use Protobuf binary format wrapped in `SignalingEnvelope`.
+3. **Registration flow**: Registration must succeed to obtain `actr_id` and `credential` before
+   discovery requests.
+4. **Message flow**: `Flow` variants distinguish peer/server directions and payload types.
+5. **Error handling**: Read loops continue until the expected response or an error is returned.
+6. **Timestamping**: Each envelope includes a timestamp for traceability.
 
-## 使用示例
+## Example Usage
 
 ```rust
-// 1. 创建客户端
-let client = SignalingClient::new(
-    "ws://localhost:8081/signaling/ws".to_string(),
-    actr_type,
-    realm,
-);
+use actr_cli::core::{NetworkServiceDiscovery, ServiceDiscovery};
 
-// 2. 执行服务发现（内部会先注册）
-let entries = client.discover_entries(filter).await?;
+// 1. Load config
+let config = config_manager.load_config(config_path).await?;
 
-// 3. 处理结果
-for entry in entries {
-    println!("Service: {} from {}", entry.actr_type.name, entry.actr_type.manufacturer);
+// 2. Create discovery component with config
+let discovery = NetworkServiceDiscovery::new(config);
+
+// 3. Use discovery (lazy connection happens internally)
+let services = discovery.discover_services(filter.as_ref()).await?;
+for service in services {
+    println!("Service: {} ({})", service.name, service.uri);
 }
 ```

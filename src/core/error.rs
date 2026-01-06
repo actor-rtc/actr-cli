@@ -46,6 +46,9 @@ pub enum ActrCliError {
     #[error("Component not registered: {component}")]
     ComponentNotRegistered { component: String },
 
+    #[error("Operation cancelled")]
+    OperationCancelled,
+
     #[error("IO error")]
     Io(#[from] std::io::Error),
 

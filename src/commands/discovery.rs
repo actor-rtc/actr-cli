@@ -8,7 +8,7 @@ use clap::Args;
 
 use crate::core::{
     ActrCliError, Command, CommandContext, CommandResult, ComponentType, DependencySpec,
-    ServiceInfo,
+    ServiceDetails, ServiceInfo,
 };
 
 /// Discovery 命令
@@ -45,50 +45,46 @@ impl Command for DiscoveryCommand {
         };
 
         // Phase 1: Service Discovery
-        println!("🔍 Scanning for Actor services in the network...");
 
         let filter = self.create_service_filter();
         let services = service_discovery.discover_services(filter.as_ref()).await?;
+        tracing::debug!("Discovered services: {:?}", services);
 
         if services.is_empty() {
             println!("ℹ️ No available Actor services discovered in the current network");
             return Ok(CommandResult::Success("No services discovered".to_string()));
         }
 
-        // Display discovered services
+        println!("🔍 Discovered Actor services:");
+        // Display discovered services table
         self.display_services_table(&services);
 
-        // Phase 2: User Interaction Selection
-        let service_options: Vec<String> = services
-            .iter()
-            .map(|s| format!("{} ({})", s.name, s.version))
-            .collect();
+        // Selection Phase
+        let service_options: Vec<String> = services.iter().map(|s| s.name.clone()).collect();
 
         let selected_index = user_interface
-            .select_from_list(&service_options, "Select a service to view")
+            .select_from_list(&service_options, "Select a service to view (Esc to quit)")
             .await?;
 
         let selected_service = &services[selected_index];
 
-        // Display service details and action menu
-        self.display_service_details(selected_service).await?;
+        // Action menu prompt
+        let menu_prompt = format!("Options for {}", selected_service.name);
 
-        // Ask user for action
+        // Action menu items (as shown in screenshot)
         let action_menu = vec![
-            "View service details".to_string(),
-            "Export proto files".to_string(),
-            "Add to configuration file".to_string(),
+            "[1] View service details (fingerprint, publication time)".to_string(),
+            "[2] Export proto files".to_string(),
+            "[3] Add to configuration file".to_string(),
         ];
 
         let action_choice = user_interface
-            .select_from_list(&action_menu, "Select an action")
+            .select_from_list(&action_menu, &menu_prompt)
             .await?;
 
         match action_choice {
             0 => {
-                // View details
-                self.show_detailed_service_info(selected_service, &service_discovery)
-                    .await?;
+                self.display_service_info(&selected_service);
                 Ok(CommandResult::Success(
                     "Service details displayed".to_string(),
                 ))
@@ -158,66 +154,83 @@ impl DiscoveryCommand {
     /// Display services table
     fn display_services_table(&self, services: &[ServiceInfo]) {
         println!();
-        println!("🔍 Discovered Actor services:");
-        println!();
-        println!("┌─────────────────┬─────────┬─────────────────────────────────┐");
-        println!("│ Service Name    │ Version │ Description                     │");
-        println!("├─────────────────┼─────────┼─────────────────────────────────┤");
+        println!("┌─────────────────┬─────────────────┬─────────────────────────────────┐");
+        println!("│ Service Name    │ Tags            │ Description                     │");
+        println!("├─────────────────┼─────────────────┼─────────────────────────────────┤");
 
         for service in services {
+            let tags_str = service.tags.join(", ");
             let description = service
                 .description
                 .as_deref()
                 .unwrap_or("No description")
                 .chars()
-                .take(28)
+                .take(30)
                 .collect::<String>();
 
+            // Simplified alignment for English content in CJK table
             println!(
-                "│ {:15} │ {:7} │ {:31} │",
+                "│ {:15} │ {:15} │ {:31} │",
                 service.name.chars().take(15).collect::<String>(),
-                service.version.chars().take(7).collect::<String>(),
+                tags_str.chars().take(15).collect::<String>(),
                 description
             );
         }
 
-        println!("└─────────────────┴─────────┴─────────────────────────────────┘");
-        println!();
-        println!("→ Use ↑↓ to select service, Enter to view options, q to quit");
+        println!("└─────────────────┴─────────────────┴─────────────────────────────────┘");
         println!();
     }
 
-    /// Display service details
-    async fn display_service_details(&self, service: &ServiceInfo) -> Result<()> {
-        println!(
-            "📋 Selected service: {} ({})",
-            service.name, service.version
-        );
+    /// Display service info
+    fn display_service_info(&self, service: &ServiceInfo) {
+        println!("📋 Selected service: {}", service.name);
         if let Some(desc) = &service.description {
             println!("📝 Description: {desc}");
         }
         println!("🔗 URI: {}", service.uri);
         println!("🔐 Fingerprint: {}", service.fingerprint);
+        let time = service
+            .published_at
+            .and_then(|published_at| chrono::DateTime::from_timestamp(published_at, 0))
+            .map(|dt| {
+                dt.with_timezone(&chrono::Local)
+                    .format("%Y-%m-%d %H:%M:%S")
+                    .to_string()
+            })
+            .unwrap_or_else(|| "Unknown".to_string());
+        println!("📅 Publication Time: {}", time);
+        println!(
+            "🏷️  Tags: {}",
+            if service.tags.is_empty() {
+                "(none)".to_string()
+            } else {
+                service.tags.join(", ")
+            }
+        );
         println!("📊 Methods count: {}", service.methods.len());
         println!();
-        Ok(())
     }
 
-    /// Show detailed service information
-    async fn show_detailed_service_info(
-        &self,
-        service: &ServiceInfo,
-        service_discovery: &std::sync::Arc<dyn crate::core::ServiceDiscovery>,
-    ) -> Result<()> {
-        println!("📖 {} Detailed Information:", service.name);
+    #[allow(unused)]
+    /// Display service details
+    fn display_service_details(&self, details: &ServiceDetails) {
+        println!("📖 {} Detailed Information:", details.info.name);
         println!("════════════════════════════════════════");
 
-        let details = service_discovery.get_service_details(&service.uri).await?;
-
         println!("🏷️  Service Name: {}", details.info.name);
-        println!("📦 Version: {}", details.info.version);
         println!("🔗 URI: {}", details.info.uri);
         println!("🔐 Fingerprint: {}", details.info.fingerprint);
+
+        if let Some(published_at) = details.info.published_at {
+            let dt = chrono::DateTime::from_timestamp(published_at, 0)
+                .map(|dt| {
+                    dt.with_timezone(&chrono::Local)
+                        .format("%Y-%m-%d %H:%M:%S")
+                        .to_string()
+                })
+                .unwrap_or_else(|| "Unknown".to_string());
+            println!("📅 Publication Time: {}", dt);
+        }
 
         if let Some(desc) = &details.info.description {
             println!("📝 Description: {desc}");
@@ -225,11 +238,15 @@ impl DiscoveryCommand {
 
         println!();
         println!("📋 Available Methods:");
-        for method in &details.info.methods {
-            println!(
-                "  • {}: {} → {}",
-                method.name, method.input_type, method.output_type
-            );
+        if details.info.methods.is_empty() {
+            println!("  (None)");
+        } else {
+            for method in &details.info.methods {
+                println!(
+                    "  • {}: {} → {}",
+                    method.name, method.input_type, method.output_type
+                );
+            }
         }
 
         if !details.dependencies.is_empty() {
@@ -242,11 +259,15 @@ impl DiscoveryCommand {
 
         println!();
         println!("📁 Proto Files:");
-        for proto in &details.proto_files {
-            println!("  • {} ({} services)", proto.name, proto.services.len());
+        if details.proto_files.is_empty() {
+            println!("  (None)");
+        } else {
+            for proto in &details.proto_files {
+                println!("  • {} ({} services)", proto.name, proto.services.len());
+            }
         }
 
-        Ok(())
+        println!();
     }
 
     /// Export proto files
@@ -287,7 +308,6 @@ impl DiscoveryCommand {
         let dependency_spec = DependencySpec {
             name: service.name.clone(),
             uri: service.uri.clone(),
-            version: Some(service.version.clone()),
             fingerprint: Some(service.fingerprint.clone()),
         };
 

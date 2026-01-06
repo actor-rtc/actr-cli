@@ -11,8 +11,9 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 // 导入核心复用组件
 use actr_cli::core::{
-    ActrCliError, Command, CommandContext, ConsoleUI, ContainerBuilder, DefaultDependencyResolver,
-    ErrorReporter, NetworkServiceDiscovery, ServiceContainer, TomlConfigManager,
+    ActrCliError, Command, CommandContext, ConfigManager, ConsoleUI, ContainerBuilder,
+    DefaultDependencyResolver, ErrorReporter, NetworkServiceDiscovery, ServiceContainer,
+    TomlConfigManager,
 };
 
 // 导入命令实现
@@ -67,7 +68,13 @@ async fn main() -> Result<()> {
         .with_level(true)
         .with_line_number(true)
         .with_file(true);
-    let _ = tracing_subscriber::registry().with(layer).try_init();
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("off"));
+    println!("filter: {filter}");
+    let _ = tracing_subscriber::registry()
+        .with(filter)
+        .with(layer)
+        .try_init();
 
     // 使用 clap 解析命令行参数
     let cli = Cli::parse();
@@ -113,6 +120,10 @@ async fn main() -> Result<()> {
         Err(e) => {
             // 统一的错误处理
             if let Some(cli_error) = e.downcast_ref::<ActrCliError>() {
+                if matches!(cli_error, ActrCliError::OperationCancelled) {
+                    // Exit silently
+                    std::process::exit(0);
+                }
                 eprintln!("{}", ErrorReporter::format_error(cli_error));
             } else {
                 eprintln!("Error: {e}");
@@ -148,8 +159,9 @@ async fn build_container() -> Result<ServiceContainer> {
     let mut container =
         container.register_dependency_resolver(Arc::new(DefaultDependencyResolver::new()));
     if let Some(manager) = config_manager {
+        let config = manager.load_config(config_path).await?;
         container =
-            container.register_service_discovery(Arc::new(NetworkServiceDiscovery::new(manager)));
+            container.register_service_discovery(Arc::new(NetworkServiceDiscovery::new(config)));
     }
     Ok(container)
 }

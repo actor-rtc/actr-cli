@@ -1,10 +1,17 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use dialoguer::{Confirm, Select, theme::ColorfulTheme};
 use std::io::{self, Write};
 
-use crate::core::{ProgressBar, ServiceInfo, UserInterface};
+use crate::core::{ProgressBar, ServiceInfo, UserInterface, ActrCliError};
 
 pub struct ConsoleUI;
+
+impl Default for ConsoleUI {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ConsoleUI {
     pub fn new() -> Self {
@@ -29,37 +36,28 @@ impl UserInterface for ConsoleUI {
     }
 
     async fn confirm(&self, message: &str) -> Result<bool> {
-        loop {
-            print!("{message} [y/N]: ");
-            io::stdout().flush().context("Failed to flush stdout")?;
-            let input = self.read_line()?.to_lowercase();
-            if input.is_empty() || input == "n" || input == "no" {
-                return Ok(false);
-            } else if input == "y" || input == "yes" {
-                return Ok(true);
-            }
-            println!("Please enter 'y' or 'n'");
-        }
+        Confirm::with_theme(&ColorfulTheme::default())
+            .with_prompt(message)
+            .default(false)
+            .interact()
+            .context("Failed to get confirmation")
     }
 
     async fn select_from_list(&self, items: &[String], prompt: &str) -> Result<usize> {
-        for (i, item) in items.iter().enumerate() {
-            println!("  {}. {}", i + 1, item);
+        if items.is_empty() {
+            return Err(anyhow::anyhow!("Cannot select from an empty list"));
         }
 
-        loop {
-            let input = self
-                .prompt_input(&format!("{} [1-{}]", prompt, items.len()))
-                .await?;
-            if let Ok(idx) = input.parse::<usize>() {
-                if idx > 0 && idx <= items.len() {
-                    return Ok(idx - 1);
-                }
-            }
-            println!(
-                "Invalid selection. Please enter a number between 1 and {}.",
-                items.len()
-            );
+        let selection = Select::with_theme(&ColorfulTheme::default())
+            .with_prompt(prompt)
+            .items(items)
+            .default(0)
+            .interact_opt()
+            .context("Failed to select from list")?;
+
+        match selection {
+            Some(index) => Ok(index),
+            None => Err(ActrCliError::OperationCancelled.into()),
         }
     }
 

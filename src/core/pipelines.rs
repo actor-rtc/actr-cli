@@ -2,6 +2,7 @@
 //!
 //! 定义了三个核心操作管道，实现命令间的逻辑复用
 
+use actr_config::Config;
 use anyhow::Result;
 use std::sync::Arc;
 
@@ -131,7 +132,6 @@ impl ValidationPipeline {
             .check_conflicts(&resolved_dependencies)
             .await?;
 
-        // 4. 串行执行网络验证和指纹验证（简化版，实际可以并行）
         let dependency_validation = self.validate_dependencies(&dependency_specs).await?;
         let network_validation = self
             .validate_network_connectivity(&resolved_dependencies)
@@ -281,7 +281,6 @@ impl ValidationPipeline {
             specs.push(DependencySpec {
                 name: dependency.alias.clone(),
                 uri,
-                version: None,
                 fingerprint: dependency.fingerprint.clone(),
             });
         }
@@ -389,7 +388,6 @@ impl InstallPipeline {
             let resolved_dep = ResolvedDependency {
                 spec: spec.clone(),
                 uri: spec.uri.clone(),
-                resolved_version: service_details.info.version,
                 fingerprint: service_details.info.fingerprint,
                 proto_files: service_details.proto_files,
             };

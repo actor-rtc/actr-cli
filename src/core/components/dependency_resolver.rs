@@ -25,7 +25,6 @@ impl DefaultDependencyResolver {
             return Err(anyhow::anyhow!("Invalid actr:// URI: {spec}"));
         }
 
-        let mut version = None;
         let mut fingerprint = None;
         if let Some(query_start) = spec.find('?') {
             let query = &spec[query_start + 1..];
@@ -37,9 +36,6 @@ impl DefaultDependencyResolver {
                 let key = iter.next().unwrap_or_default();
                 let value = iter.next().unwrap_or_default();
                 match key {
-                    "version" if !value.is_empty() => {
-                        version = Some(value.to_string());
-                    }
                     "fingerprint" if !value.is_empty() => {
                         fingerprint = Some(value.to_string());
                     }
@@ -51,24 +47,22 @@ impl DefaultDependencyResolver {
         Ok(DependencySpec {
             name: name.to_string(),
             uri: spec.to_string(),
-            version,
             fingerprint,
         })
     }
 
     fn parse_versioned_spec(&self, spec: &str) -> Result<DependencySpec> {
-        let (name, version) = spec
+        let (name, _tag) = spec
             .rsplit_once('@')
             .ok_or_else(|| anyhow::anyhow!("Invalid package specification: {spec}"))?;
-        if name.is_empty() || version.is_empty() {
+        if name.is_empty() {
             return Err(anyhow::anyhow!("Invalid package specification: {spec}"));
         }
 
-        let uri = format!("actr://{name}/?version={version}");
+        let uri = format!("actr://{name}/");
         Ok(DependencySpec {
             name: name.to_string(),
             uri,
-            version: Some(version.to_string()),
             fingerprint: None,
         })
     }
@@ -82,7 +76,6 @@ impl DefaultDependencyResolver {
         Ok(DependencySpec {
             name: name.to_string(),
             uri,
-            version: None,
             fingerprint: None,
         })
     }
@@ -118,7 +111,6 @@ impl DependencyResolver for DefaultDependencyResolver {
             resolved.push(ResolvedDependency {
                 spec: spec.clone(),
                 uri: spec.uri.clone(),
-                resolved_version: spec.version.clone().unwrap_or_else(|| "latest".to_string()),
                 fingerprint: spec.fingerprint.clone().unwrap_or_default(),
                 proto_files: Vec::new(),
             });
@@ -134,18 +126,6 @@ impl DependencyResolver for DefaultDependencyResolver {
             for j in (i + 1)..deps.len() {
                 if deps[i].spec.name != deps[j].spec.name {
                     continue;
-                }
-
-                if deps[i].resolved_version != deps[j].resolved_version {
-                    conflicts.push(ConflictReport {
-                        dependency_a: deps[i].spec.name.clone(),
-                        dependency_b: deps[j].spec.name.clone(),
-                        conflict_type: ConflictType::VersionConflict,
-                        description: format!(
-                            "Dependency {} has conflicting versions: {} vs {}",
-                            deps[i].spec.name, deps[i].resolved_version, deps[j].resolved_version
-                        ),
-                    });
                 }
 
                 if !deps[i].fingerprint.is_empty()

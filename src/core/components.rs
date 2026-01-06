@@ -6,12 +6,13 @@ pub mod config_manager;
 pub mod dependency_resolver;
 pub mod service_discovery;
 pub mod user_interface;
-pub use actr_config::Config;
+use actr_protocol::discovery_response::TypeEntry;
 pub use config_manager::TomlConfigManager;
 pub use dependency_resolver::DefaultDependencyResolver;
 pub use service_discovery::NetworkServiceDiscovery;
 pub use user_interface::ConsoleUI;
 
+use actr_config::Config;
 use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -26,7 +27,6 @@ use std::path::{Path, PathBuf};
 pub struct DependencySpec {
     pub name: String,
     pub uri: String,
-    pub version: Option<String>,
     pub fingerprint: Option<String>,
 }
 
@@ -35,7 +35,6 @@ pub struct DependencySpec {
 pub struct ResolvedDependency {
     pub spec: DependencySpec,
     pub uri: String,
-    pub resolved_version: String,
     pub fingerprint: String,
     pub proto_files: Vec<ProtoFile>,
 }
@@ -67,10 +66,12 @@ pub struct MethodDefinition {
 /// 服务信息
 #[derive(Debug, Clone)]
 pub struct ServiceInfo {
+    /// Service name generate from actr_type.to_string_repr
     pub name: String,
     pub uri: String,
-    pub version: String,
+    pub tags: Vec<String>,
     pub fingerprint: String,
+    pub published_at: Option<i64>,
     pub description: Option<String>,
     pub methods: Vec<MethodDefinition>,
 }
@@ -446,4 +447,29 @@ pub trait ProgressBar: Send + Sync {
     fn update(&self, progress: f64);
     fn set_message(&self, message: &str);
     fn finish(&self);
+}
+
+impl From<TypeEntry> for ServiceInfo {
+    fn from(entry: TypeEntry) -> Self {
+        let actr_type = entry.actr_type;
+        let name = entry.name;
+
+        let uri = if actr_type.manufacturer.trim().is_empty() {
+            format!("actr://{}/", actr_type.name)
+        } else {
+            format!("actr://{}+{}/", actr_type.manufacturer, actr_type.name)
+        };
+
+        let tags = entry.tags.clone();
+
+        Self {
+            name,
+            uri,
+            tags,
+            published_at: entry.published_at,
+            fingerprint: entry.service_fingerprint,
+            description: entry.description,
+            methods: Vec::new(),
+        }
+    }
 }

@@ -187,60 +187,56 @@ impl InstallCommand {
         };
 
         // Extract query parameters (simplified version)
-        let (version, fingerprint) = if uri.contains('?') {
+        let fingerprint = if uri.contains('?') {
             self.parse_query_params(uri)?
         } else {
-            (None, None)
+            None
         };
 
         Ok(DependencySpec {
             name: service_name,
             uri: uri.to_string(),
-            version,
             fingerprint,
         })
     }
 
     /// Parse query parameters
-    fn parse_query_params(&self, uri: &str) -> Result<(Option<String>, Option<String>)> {
+    fn parse_query_params(&self, uri: &str) -> Result<Option<String>> {
         if let Some(query_start) = uri.find('?') {
             let query = &uri[query_start + 1..];
-            let mut version = None;
             let mut fingerprint = None;
 
             for param in query.split('&') {
                 if let Some((key, value)) = param.split_once('=') {
                     match key {
-                        "version" => version = Some(value.to_string()),
                         "fingerprint" => fingerprint = Some(value.to_string()),
                         _ => {} // Ignore unknown parameters
                     }
                 }
             }
 
-            Ok((version, fingerprint))
+            Ok(fingerprint)
         } else {
-            Ok((None, None))
+            Ok(None)
         }
     }
 
-    /// Parse versioned spec (service@version)
+    /// Parse versioned spec (service@tag)
     fn parse_versioned_spec(&self, spec: &str) -> Result<DependencySpec> {
         let parts: Vec<&str> = spec.split('@').collect();
         if parts.len() != 2 {
             return Err(anyhow::anyhow!(
-                "Invalid package specification: {spec}. Use 'service-name@version'"
+                "Invalid package specification: {spec}. Use 'service-name@tag'"
             ));
         }
 
         let service_name = parts[0].to_string();
-        let version = parts[1].to_string();
-        let uri = format!("actr://{service_name}/?version={version}");
+        let _tag = parts[1].to_string();
+        let uri = format!("actr://{service_name}/");
 
         Ok(DependencySpec {
             name: service_name,
             uri,
-            version: Some(version),
             fingerprint: None,
         })
     }
@@ -253,7 +249,6 @@ impl InstallCommand {
         Ok(DependencySpec {
             name: service_name,
             uri,
-            version: None,
             fingerprint: None,
         })
     }
@@ -288,7 +283,6 @@ impl InstallCommand {
             specs.push(DependencySpec {
                 name: dependency.alias.clone(),
                 uri,
-                version: None,
                 fingerprint: dependency.fingerprint.clone(),
             });
         }
@@ -344,7 +338,6 @@ mod tests {
 
         assert_eq!(spec.name, "user-service");
         assert_eq!(spec.uri, "actr://user-service/");
-        assert_eq!(spec.version, None);
         assert_eq!(spec.fingerprint, None);
     }
 
@@ -354,8 +347,7 @@ mod tests {
         let spec = cmd.parse_versioned_spec("user-service@1.2.0").unwrap();
 
         assert_eq!(spec.name, "user-service");
-        assert_eq!(spec.uri, "actr://user-service/?version=1.2.0");
-        assert_eq!(spec.version, Some("1.2.0".to_string()));
+        assert_eq!(spec.uri, "actr://user-service/");
         assert_eq!(spec.fingerprint, None);
     }
 
@@ -366,7 +358,6 @@ mod tests {
 
         assert_eq!(spec.name, "user-service");
         assert_eq!(spec.uri, "actr://user-service/");
-        assert_eq!(spec.version, None);
         assert_eq!(spec.fingerprint, None);
     }
 
@@ -382,7 +373,6 @@ mod tests {
             spec.uri,
             "actr://user-service/?version=1.2.0&fingerprint=sha256:abc123"
         );
-        assert_eq!(spec.version, Some("1.2.0".to_string()));
         assert_eq!(spec.fingerprint, Some("sha256:abc123".to_string()));
     }
 }

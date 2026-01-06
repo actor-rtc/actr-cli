@@ -1,20 +1,27 @@
 edition = 1
 exports = []
 
+[[acl.rules]]
+permission = "allow"
+types = ["acme+EchoService"]
+
+[dependencies.EchoService]
+actr_type = "acme+EchoService"
+fingerprint = "service_semantic:0d0d204d724cafc1cb8fd5d6f68ca683d9f6546c6e70deab75781a2f4230a755"
+
 [package]
+authors = []
+description = "An Actor-RTC client"
 name = "echo"
 version = "0.1.0"
-description = "An Actor-RTC client"
-authors = []
 
 [package.actr_type]
 manufacturer = "acme"
 name = "echo-client-app"
 
-[dependencies]
-
-[system.signaling]
-url = "ws://localhost:8081/signaling/ws"
+[scripts]
+dev = "cargo run"
+test = "cargo test"
 
 [system.deployment]
 realm_id = 1001
@@ -22,16 +29,5 @@ realm_id = 1001
 [system.discovery]
 visible = true
 
-
-# ACL configuration - allow echo server
-[acl]
-
-[[acl.rules]]
-permission = "allow"
-# Allow server with actr_type = "acme+EchoService"
-types = ["acme+EchoService"]
-
-
-[scripts]
-dev = "cargo run"
-test = "cargo test"
+[system.signaling]
+url = "ws://localhost:8081/signaling/ws"
