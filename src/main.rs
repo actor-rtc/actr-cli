@@ -71,7 +71,6 @@ async fn main() -> Result<()> {
         .with_file(true);
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("off"));
-    println!("filter: {filter}");
     let _ = tracing_subscriber::registry()
         .with(filter)
         .with(layer)
@@ -127,7 +126,7 @@ async fn main() -> Result<()> {
                 }
                 eprintln!("{}", ErrorReporter::format_error(cli_error));
             } else {
-                eprintln!("Error: {e}");
+                eprintln!("Error: {e:?}");
             }
             std::process::exit(1);
         }

@@ -21,6 +21,7 @@ pub use service_discovery::NetworkServiceDiscovery;
 pub use user_interface::ConsoleUI;
 
 use actr_config::Config;
+use actr_protocol::ActrTypeExt;
 use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -257,13 +258,13 @@ pub trait ServiceDiscovery: Send + Sync {
     async fn discover_services(&self, filter: Option<&ServiceFilter>) -> Result<Vec<ServiceInfo>>;
 
     /// 获取服务详细信息
-    async fn get_service_details(&self, uri: &str) -> Result<ServiceDetails>;
+    async fn get_service_details(&self, name: &str) -> Result<ServiceDetails>;
 
     /// 检查服务可用性
-    async fn check_service_availability(&self, uri: &str) -> Result<AvailabilityStatus>;
+    async fn check_service_availability(&self, name: &str) -> Result<AvailabilityStatus>;
 
     /// 获取服务Proto文件
-    async fn get_service_proto(&self, uri: &str) -> Result<Vec<ProtoFile>>;
+    async fn get_service_proto(&self, name: &str) -> Result<Vec<ProtoFile>>;
 }
 
 #[derive(Debug, Clone)]
@@ -460,13 +461,9 @@ pub trait ProgressBar: Send + Sync {
 impl From<TypeEntry> for ServiceInfo {
     fn from(entry: TypeEntry) -> Self {
         let actr_type = entry.actr_type;
-        let name = entry.name;
+        let name = actr_type.to_string_repr();
 
-        let uri = if actr_type.manufacturer.trim().is_empty() {
-            format!("actr://{}/", actr_type.name)
-        } else {
-            format!("actr://{}+{}/", actr_type.manufacturer, actr_type.name)
-        };
+        let uri = format!("actr://{}/", name);
 
         let tags = entry.tags.clone();
 

@@ -154,9 +154,82 @@ impl DiscoveryCommand {
     /// Display services table
     fn display_services_table(&self, services: &[ServiceInfo]) {
         println!();
-        println!("┌─────────────────┬─────────────────┬─────────────────────────────────┐");
-        println!("│ Service Name    │ Tags            │ Description                     │");
-        println!("├─────────────────┼─────────────────┼─────────────────────────────────┤");
+        // Total width limit is 160
+        const TOTAL_MAX_WIDTH: usize = 160;
+        // Border and separator overhead
+        const BORDER_OVERHEAD: usize = 7;
+
+        // Calculate the maximum width of each column
+        let name_width = services
+            .iter()
+            .map(|s| s.name.chars().count())
+            .max()
+            .unwrap_or(0)
+            .max("Service Name".len());
+
+        let tags_width = services
+            .iter()
+            .map(|s| s.tags.join(", ").chars().count())
+            .max()
+            .unwrap_or(0)
+            .max("Tags".len());
+
+        let desc_width = services
+            .iter()
+            .map(|s| {
+                s.description
+                    .as_deref()
+                    .unwrap_or("No description")
+                    .chars()
+                    .count()
+            })
+            .max()
+            .unwrap_or(0)
+            .max("Description".len());
+
+        let name_w = name_width;
+        let tags_w = tags_width;
+        let mut desc_w = desc_width;
+
+        // If the total width is exceeded, truncate the Description
+        if name_w + tags_w + desc_w + BORDER_OVERHEAD > TOTAL_MAX_WIDTH {
+            let available = TOTAL_MAX_WIDTH - BORDER_OVERHEAD;
+            let used = name_w + tags_w;
+            desc_w = available.saturating_sub(used).max(10); // Description 至少 10 字符
+        }
+
+        // Generate table header
+        let top_border = format!(
+            "┌─{}─┬─{}─┬─{}─┐",
+            "─".repeat(name_w),
+            "─".repeat(tags_w),
+            "─".repeat(desc_w)
+        );
+        let header = format!(
+            "│ {:width$} │ {:tags_w$} │ {:desc_w$} │",
+            "Service Name",
+            "Tags",
+            "Description",
+            width = name_w,
+            tags_w = tags_w,
+            desc_w = desc_w
+        );
+        let separator = format!(
+            "├─{}─┼─{}─┼─{}─┤",
+            "─".repeat(name_w),
+            "─".repeat(tags_w),
+            "─".repeat(desc_w)
+        );
+        let bottom_border = format!(
+            "└─{}─┴─{}─┴─{}─┘",
+            "─".repeat(name_w),
+            "─".repeat(tags_w),
+            "─".repeat(desc_w)
+        );
+
+        println!("{top_border}");
+        println!("{header}");
+        println!("{separator}");
 
         for service in services {
             let tags_str = service.tags.join(", ");
@@ -165,19 +238,21 @@ impl DiscoveryCommand {
                 .as_deref()
                 .unwrap_or("No description")
                 .chars()
-                .take(30)
+                .take(desc_w)
                 .collect::<String>();
 
-            // Simplified alignment for English content in CJK table
             println!(
-                "│ {:15} │ {:15} │ {:31} │",
-                service.name.chars().take(15).collect::<String>(),
-                tags_str.chars().take(15).collect::<String>(),
-                description
+                "│ {:name_w$} │ {:tags_w$} │ {:desc_w$} │",
+                service.name,
+                tags_str.chars().take(tags_w).collect::<String>(),
+                description,
+                name_w = name_w,
+                tags_w = tags_w,
+                desc_w = desc_w
             );
         }
 
-        println!("└─────────────────┴─────────────────┴─────────────────────────────────┘");
+        println!("{bottom_border}");
         println!();
     }
 
@@ -278,12 +353,15 @@ impl DiscoveryCommand {
     ) -> Result<()> {
         println!("📤 Exporting proto files for {}...", service.name);
 
-        let proto_files = service_discovery.get_service_proto(&service.uri).await?;
+        let proto_files = service_discovery.get_service_proto(&service.name).await?;
+
+        let output_dir = std::path::Path::new("proto").join("remote");
+        std::fs::create_dir_all(&output_dir)?;
 
         for proto in &proto_files {
-            let file_path = format!("./exported_{}", proto.name);
+            let file_path = output_dir.join(&proto.name);
             std::fs::write(&file_path, &proto.content)?;
-            println!("✅ Exported: {file_path}");
+            println!("✅ Exported: {}", file_path.display());
         }
 
         println!("🎉 Export completed, total {} files", proto_files.len());

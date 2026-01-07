@@ -2,7 +2,7 @@
 //!
 //! 定义了三个核心操作管道，实现命令间的逻辑复用
 
-use actr_config::Config;
+use actr_config::{Config, LockFile, LockedDependency, ProtoFileMeta, ServiceSpecMeta};
 use anyhow::Result;
 use std::sync::Arc;
 
@@ -179,7 +179,7 @@ impl ValidationPipeline {
         for spec in specs {
             let validation = match self
                 .service_discovery
-                .check_service_availability(&spec.uri)
+                .check_service_availability(&spec.name)
                 .await
             {
                 Ok(status) => DependencyValidation {
@@ -234,7 +234,11 @@ impl ValidationPipeline {
             };
 
             // 计算实际指纹
-            let service_info = match self.service_discovery.get_service_details(&dep.uri).await {
+            let service_info = match self
+                .service_discovery
+                .get_service_details(&dep.spec.name)
+                .await
+            {
                 Ok(details) => details.info,
                 Err(e) => {
                     results.push(FingerprintValidation {
@@ -401,7 +405,7 @@ impl InstallPipeline {
             let service_details = self
                 .validation_pipeline
                 .service_discovery
-                .get_service_details(&spec.uri)
+                .get_service_details(&spec.name)
                 .await?;
 
             self.cache_manager
@@ -429,10 +433,8 @@ impl InstallPipeline {
 
     /// Update lock file with new format (no embedded proto content)
     async fn update_lock_file(&self, dependencies: &[ResolvedDependency]) -> Result<()> {
-        use actr_config::{LockFile, LockedDependency, LockedProtoFile};
-
         let project_root = self.config_manager.get_project_root();
-        let lock_file_path = project_root.join("actr.lock.toml");
+        let lock_file_path = project_root.join("Actr.lock.toml");
 
         // Load existing lock file or create new one
         let mut lock_file = if lock_file_path.exists() {
@@ -446,30 +448,38 @@ impl InstallPipeline {
             // Parse actr_type from URI (format: actr://realm:manufacturer+name@version/)
             let actr_type = Self::parse_actr_type_from_uri(&dep.uri)?;
 
-            // Create file references (path + fingerprint only, no content)
-            let files: Vec<LockedProtoFile> = dep
+            // Create protobuf entries with relative path (no content)
+            let protobufs: Vec<ProtoFileMeta> = dep
                 .proto_files
                 .iter()
                 .map(|pf| {
-                    // Generate path format: {service_name}/{package}.proto
-                    let path = format!("{}/{}.proto", actr_type, pf.name);
-                    LockedProtoFile {
+                    let file_name = if pf.name.ends_with(".proto") {
+                        pf.name.clone()
+                    } else {
+                        format!("{}.proto", pf.name)
+                    };
+                    // Path relative to proto/remote/ (e.g., "manufacturer+name/file.proto")
+                    let path = format!("{}/{}", actr_type, file_name);
+
+                    ProtoFileMeta {
                         path,
                         fingerprint: String::new(), // TODO: compute semantic fingerprint
                     }
                 })
                 .collect();
 
-            // Create locked dependency with explicit files (new format)
-            let locked_dep = LockedDependency::with_files(
-                dep.spec.name.clone(),
-                actr_type,
-                None, // description
-                dep.fingerprint.clone(),
-                None,       // published_at
-                Vec::new(), // tags
-                files,
-            );
+            // Create service spec metadata
+            let spec = ServiceSpecMeta {
+                name: dep.spec.name.clone(),
+                description: None,
+                fingerprint: dep.fingerprint.clone(),
+                protobufs,
+                published_at: None,
+                tags: Vec::new(),
+            };
+
+            // Create locked dependency
+            let locked_dep = LockedDependency::new(dep.spec.name.clone(), actr_type, spec);
             lock_file.add_dependency(locked_dep);
         }
 

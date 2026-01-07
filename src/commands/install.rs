@@ -41,13 +41,13 @@ pub enum InstallMode {
     /// Mode 1: Add new dependency (npm install <package>)
     /// - Pull remote proto to proto/ folder
     /// - Modify Actr.toml (add dependency)
-    /// - Update actr.lock.toml
+    /// - Update Actr.lock.toml
     AddNewPackage { packages: Vec<String> },
 
     /// Mode 2: Install dependencies in config (npm install)
     /// - Do NOT modify Actr.toml
     /// - Use lock file versions if available
-    /// - Only update actr.lock.toml
+    /// - Only update Actr.lock.toml
     InstallFromConfig { force_update: bool },
 }
 
@@ -140,7 +140,7 @@ impl InstallCommand {
     /// Execute Mode 1: Add new package (actr install <package>)
     /// - Pull remote proto to proto/ folder
     /// - Modify Actr.toml (add dependency)
-    /// - Update actr.lock.toml
+    /// - Update Actr.lock.toml
     async fn execute_add_package(
         &self,
         context: &CommandContext,
@@ -164,7 +164,7 @@ impl InstallCommand {
             let service_details = install_pipeline
                 .validation_pipeline()
                 .service_discovery()
-                .get_service_details(&spec.uri)
+                .get_service_details(&spec.name)
                 .await?;
 
             println!("  ├─ 🎯 fingerprint 选择");
@@ -216,7 +216,7 @@ impl InstallCommand {
                         .await?;
 
                     println!("  ├─ 📦 缓存 proto 文件 ✅");
-                    println!("  ├─ 🔒 更新 actr.lock.toml ✅");
+                    println!("  ├─ 🔒 更新 Actr.lock.toml ✅");
                     println!("  └─ ✅ 清理备份文件");
                     println!();
                     self.display_install_success(&result);
@@ -239,7 +239,7 @@ impl InstallCommand {
     /// Execute Mode 2: Install from config (actr install)
     /// - Do NOT modify Actr.toml
     /// - Use lock file versions if available
-    /// - Only update actr.lock.toml
+    /// - Only update Actr.lock.toml
     async fn execute_install_from_config(
         &self,
         context: &CommandContext,
@@ -276,7 +276,7 @@ impl InstallCommand {
         // Check if we should use lock file (unless force_update)
         if !force_update {
             let project_root = install_pipeline.config_manager().get_project_root();
-            let lock_file_path = project_root.join("actr.lock.toml");
+            let lock_file_path = project_root.join("Actr.lock.toml");
             if lock_file_path.exists() {
                 println!("  ├─ 🔒 使用锁文件中的版本");
             }
@@ -296,7 +296,7 @@ impl InstallCommand {
         {
             Ok(install_result) => {
                 println!("  ├─ 📦 缓存 proto 文件 ✅");
-                println!("  ├─ 🔒 更新 actr.lock.toml ✅");
+                println!("  ├─ 🔒 更新 Actr.lock.toml ✅");
                 println!("  └─ ✅ 安装完成");
                 println!();
                 self.display_install_success(&install_result);

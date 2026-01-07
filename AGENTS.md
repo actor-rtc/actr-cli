@@ -11,6 +11,7 @@
 - `cargo build --release` produces an optimized binary for releases.
 - `cargo install --path .` installs the local `actr` binary into your Cargo bin.
 - `cargo fmt` formats Rust code with rustfmt.
+- After each change, run `cargo fmt` and `cargo check`.
 - `cargo test` runs the test suite (optional for changes unless explicitly requested).
 - Example: `cargo build --release && cargo fmt`.
 

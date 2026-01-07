@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use tokio::fs;
-use toml::map::Map;
+use toml_edit::{DocumentMut, InlineTable, Item, Table, Value};
 
 use crate::core::{ConfigBackup, ConfigManager, ConfigValidation, DependencySpec};
 
@@ -33,20 +33,6 @@ impl TomlConfigManager {
         fs::write(path, contents)
             .await
             .with_context(|| format!("Failed to write config file: {}", path.display()))
-    }
-
-    fn dependency_to_value(spec: &DependencySpec) -> toml::Value {
-        let mut table = Map::new();
-        if let Some(fingerprint) = &spec.fingerprint {
-            if let Some(actr_type) = Self::actr_type_from_uri(&spec.uri) {
-                table.insert("actr_type".to_string(), toml::Value::String(actr_type));
-            }
-            table.insert(
-                "fingerprint".to_string(),
-                toml::Value::String(fingerprint.clone()),
-            );
-        }
-        toml::Value::Table(table)
     }
 
     fn actr_type_from_uri(uri: &str) -> Option<String> {
@@ -109,23 +95,26 @@ impl ConfigManager for TomlConfigManager {
 
     async fn update_dependency(&self, spec: &DependencySpec) -> Result<()> {
         let contents = self.read_config_string(&self.config_path).await?;
-        let mut value: toml::Value = toml::from_str(&contents)
+        let mut doc = contents
+            .parse::<DocumentMut>()
             .with_context(|| format!("Failed to parse config: {}", self.config_path.display()))?;
 
-        let root = value
-            .as_table_mut()
-            .ok_or_else(|| anyhow::anyhow!("Config root must be a table"))?;
-        let deps_value = root
-            .entry("dependencies".to_string())
-            .or_insert_with(|| toml::Value::Table(Map::new()));
-        let deps_table = deps_value
-            .as_table_mut()
-            .ok_or_else(|| anyhow::anyhow!("dependencies must be a table"))?;
+        if !doc.contains_key("dependencies") {
+            doc["dependencies"] = Item::Table(Table::new());
+        }
 
-        deps_table.insert(spec.name.clone(), Self::dependency_to_value(spec));
+        let mut dep_table = InlineTable::new();
+        if let Some(fingerprint) = &spec.fingerprint {
+            if let Some(actr_type) = Self::actr_type_from_uri(&spec.uri) {
+                dep_table.insert("actr_type", Value::from(actr_type));
+            }
+            dep_table.insert("fingerprint", Value::from(fingerprint.as_str()));
+        }
 
-        let updated = toml::to_string_pretty(&value).context("Failed to serialize config")?;
-        self.write_config_string(&self.config_path, &updated).await
+        doc["dependencies"][&spec.name] = Item::Value(Value::InlineTable(dep_table));
+
+        self.write_config_string(&self.config_path, &doc.to_string())
+            .await
     }
 
     async fn validate_config(&self) -> Result<ConfigValidation> {

@@ -1,6 +1,6 @@
 //! Default CacheManager implementation
 //!
-//! Proto files are cached to the project's `proto/` folder (not ~/.actr/cache)
+//! Proto files are cached to the project's `proto/remote/` folder (not ~/.actr/cache)
 //! following the documentation spec for dependency management.
 
 use anyhow::Result;
@@ -11,7 +11,7 @@ use super::{CacheManager, CacheStats, CachedProto, Fingerprint, ProtoFile};
 
 /// Default cache manager (file-based, project-local)
 ///
-/// Caches proto files to `{project_root}/proto/{service_name}/` directory
+/// Caches proto files to `{project_root}/proto/remote/{service_name}/` directory
 /// following the documentation spec.
 pub struct DefaultCacheManager {
     /// Project root directory (where Actr.toml is located)
@@ -30,38 +30,29 @@ impl DefaultCacheManager {
     }
 
     /// Get the proto cache directory for a service
-    /// Returns: {project_root}/proto/{service_name}/
+    /// Returns: {project_root}/proto/remote/{service_name}/
     fn get_service_proto_dir(&self, service_name: &str) -> PathBuf {
-        self.project_root.join("proto").join(service_name)
+        self.project_root
+            .join("proto")
+            .join("remote")
+            .join(service_name)
     }
 
     /// Extract service name from actr:// URI
-    /// Format: actr://realm:manufacturer+name@version/ -> manufacturer+name
+    /// Keeps manufacturer part; removes optional realm prefix and @version suffix.
     fn extract_service_name_from_uri(uri: &str) -> String {
         let clean_uri = uri.trim_start_matches("actr://").trim_end_matches('/');
 
-        // Handle realm:manufacturer+name@version format
-        if let Some(colon_pos) = clean_uri.find(':') {
-            let after_realm = &clean_uri[colon_pos + 1..];
-            // Remove @version if present
-            if let Some(at_pos) = after_realm.find('@') {
-                after_realm[..at_pos].to_string()
-            } else {
-                after_realm.to_string()
-            }
-        } else if let Some(at_pos) = clean_uri.find('@') {
-            // Handle manufacturer+name@version format (no realm)
-            clean_uri[..at_pos].to_string()
-        } else {
-            clean_uri.to_string()
-        }
-    }
+        let without_version = clean_uri.split('@').next().unwrap_or(clean_uri);
 
-    /// Generate proto file path for caching
-    /// Format: {service_name}/{package_name}.proto
-    fn generate_proto_path(service_name: &str, package_name: &str) -> String {
-        // Convert package name to file path (e.g., user.v1 -> user.v1.proto)
-        format!("{}/{}.proto", service_name, package_name)
+        if let Some((prefix, rest)) = without_version.split_once(':') {
+            // If prefix is numeric, treat it as realm and strip it; otherwise keep full string.
+            if prefix.chars().all(|c| c.is_ascii_digit()) {
+                return rest.to_string();
+            }
+        }
+
+        without_version.to_string()
     }
 }
 
@@ -134,7 +125,7 @@ impl CacheManager for DefaultCacheManager {
         }
 
         tracing::info!(
-            "Cached {} proto files to proto/{}/",
+            "Cached {} proto files to proto/remote/{}/",
             files.len(),
             service_name
         );
