@@ -54,7 +54,19 @@ impl TomlConfigManager {
         let name_end = without_scheme
             .find(|c| ['/', '?'].contains(&c))
             .unwrap_or(without_scheme.len());
-        let name = without_scheme[..name_end].trim();
+        let mut name = &without_scheme[..name_end];
+
+        // Remove realm: prefix if present (e.g., "5:acme+EchoService@v1" -> "acme+EchoService@v1")
+        if let Some(colon_pos) = name.find(':') {
+            name = &name[colon_pos + 1..];
+        }
+
+        // Remove @version suffix if present (e.g., "acme+EchoService@v1" -> "acme+EchoService")
+        if let Some(at_pos) = name.find('@') {
+            name = &name[..at_pos];
+        }
+
+        let name = name.trim();
         if name.is_empty() {
             None
         } else {

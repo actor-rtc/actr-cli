@@ -12,8 +12,9 @@ use tracing_subscriber::util::SubscriberInitExt;
 // 导入核心复用组件
 use actr_cli::core::{
     ActrCliError, Command, CommandContext, ConfigManager, ConsoleUI, ContainerBuilder,
-    DefaultDependencyResolver, ErrorReporter, NetworkServiceDiscovery, ServiceContainer,
-    TomlConfigManager,
+    DefaultCacheManager, DefaultDependencyResolver, DefaultFingerprintValidator,
+    DefaultNetworkValidator, DefaultProtoProcessor, ErrorReporter, NetworkServiceDiscovery,
+    ServiceContainer, TomlConfigManager,
 };
 
 // 导入命令实现
@@ -158,6 +159,20 @@ async fn build_container() -> Result<ServiceContainer> {
 
     let mut container =
         container.register_dependency_resolver(Arc::new(DefaultDependencyResolver::new()));
+
+    // Register network validator (stub implementation)
+    container = container.register_network_validator(Arc::new(DefaultNetworkValidator::new()));
+
+    // Register fingerprint validator
+    container =
+        container.register_fingerprint_validator(Arc::new(DefaultFingerprintValidator::new()));
+
+    // Register proto processor
+    container = container.register_proto_processor(Arc::new(DefaultProtoProcessor::new()));
+
+    // Register cache manager
+    container = container.register_cache_manager(Arc::new(DefaultCacheManager::new()));
+
     if let Some(manager) = config_manager {
         let config = manager.load_config(config_path).await?;
         container =

@@ -2,13 +2,21 @@
 //!
 //! 定义了8个核心组件的trait接口，支持依赖注入和组合使用
 
+pub mod cache_manager;
 pub mod config_manager;
 pub mod dependency_resolver;
+pub mod fingerprint_validator;
+pub mod network_validator;
+pub mod proto_processor;
 pub mod service_discovery;
 pub mod user_interface;
 use actr_protocol::discovery_response::TypeEntry;
+pub use cache_manager::DefaultCacheManager;
 pub use config_manager::TomlConfigManager;
 pub use dependency_resolver::DefaultDependencyResolver;
+pub use fingerprint_validator::DefaultFingerprintValidator;
+pub use network_validator::DefaultNetworkValidator;
+pub use proto_processor::DefaultProtoProcessor;
 pub use service_discovery::NetworkServiceDiscovery;
 pub use user_interface::ConsoleUI;
 

@@ -93,6 +93,21 @@ impl ValidationPipeline {
         }
     }
 
+    /// Get service discovery component
+    pub fn service_discovery(&self) -> &Arc<dyn ServiceDiscovery> {
+        &self.service_discovery
+    }
+
+    /// Get network validator component
+    pub fn network_validator(&self) -> &Arc<dyn NetworkValidator> {
+        &self.network_validator
+    }
+
+    /// Get config manager component
+    pub fn config_manager(&self) -> &Arc<dyn ConfigManager> {
+        &self.config_manager
+    }
+
     /// 完整的项目验证流程
     pub async fn validate_project(&self) -> Result<ValidationReport> {
         // 1. 配置文件验证
@@ -317,6 +332,16 @@ impl InstallPipeline {
         }
     }
 
+    /// Get validation pipeline reference
+    pub fn validation_pipeline(&self) -> &ValidationPipeline {
+        &self.validation_pipeline
+    }
+
+    /// Get config manager reference
+    pub fn config_manager(&self) -> &Arc<dyn ConfigManager> {
+        &self.config_manager
+    }
+
     /// Check-First 安装流程
     pub async fn install_dependencies(&self, specs: &[DependencySpec]) -> Result<InstallResult> {
         // 🔍 阶段1: 完整验证 (复用ValidationPipeline)
@@ -402,12 +427,75 @@ impl InstallPipeline {
         Ok(result)
     }
 
-    /// Update lock file
+    /// Update lock file with new format (no embedded proto content)
     async fn update_lock_file(&self, dependencies: &[ResolvedDependency]) -> Result<()> {
-        // TODO: Implement lock file update logic
-        // Should read existing lock file, merge new dependency info, then write back
-        println!("Updating lock file: {} dependencies", dependencies.len());
+        use actr_config::{LockFile, LockedDependency, LockedProtoFile};
+
+        let project_root = self.config_manager.get_project_root();
+        let lock_file_path = project_root.join("actr.lock.toml");
+
+        // Load existing lock file or create new one
+        let mut lock_file = if lock_file_path.exists() {
+            LockFile::from_file(&lock_file_path).unwrap_or_else(|_| LockFile::new())
+        } else {
+            LockFile::new()
+        };
+
+        // Update dependencies
+        for dep in dependencies {
+            // Parse actr_type from URI (format: actr://realm:manufacturer+name@version/)
+            let actr_type = Self::parse_actr_type_from_uri(&dep.uri)?;
+
+            // Create file references (path + fingerprint only, no content)
+            let files: Vec<LockedProtoFile> = dep
+                .proto_files
+                .iter()
+                .map(|pf| {
+                    // Generate path format: {service_name}/{package}.proto
+                    let path = format!("{}/{}.proto", actr_type, pf.name);
+                    LockedProtoFile {
+                        path,
+                        fingerprint: String::new(), // TODO: compute semantic fingerprint
+                    }
+                })
+                .collect();
+
+            // Create locked dependency with explicit files (new format)
+            let locked_dep = LockedDependency::with_files(
+                dep.spec.name.clone(),
+                actr_type,
+                None, // description
+                dep.fingerprint.clone(),
+                None,       // published_at
+                Vec::new(), // tags
+                files,
+            );
+            lock_file.add_dependency(locked_dep);
+        }
+
+        // Update timestamp and save
+        lock_file.update_timestamp();
+        lock_file.save_to_file(&lock_file_path)?;
+
+        tracing::info!("Updated lock file: {} dependencies", dependencies.len());
         Ok(())
+    }
+
+    /// Parse actr_type from URI (format: actr://realm:manufacturer+name@version/)
+    fn parse_actr_type_from_uri(uri: &str) -> Result<String> {
+        // Example: actr://1:example+echo-service@v1/
+        // Extract: example+echo-service
+        let parts: Vec<&str> = uri
+            .trim_start_matches("actr://")
+            .split([':', '@', '/'])
+            .collect();
+
+        if parts.len() >= 2 {
+            // parts[0] = realm, parts[1] = manufacturer+name
+            Ok(parts[1].to_string())
+        } else {
+            Err(anyhow::anyhow!("Invalid actr URI format: {}", uri))
+        }
     }
 }
 

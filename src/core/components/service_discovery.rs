@@ -1,7 +1,8 @@
 use actr_config::Config;
 use actr_protocol::{
-    AIdCredential, ActrId, ActrToSignaling, DiscoveryRequest, ErrorResponse, PeerToSignaling,
-    RegisterRequest, SignalingEnvelope, actr_to_signaling, discovery_response, peer_to_signaling,
+    AIdCredential, ActrId, ActrToSignaling, ActrType, DiscoveryRequest, ErrorResponse,
+    GetServiceSpecRequest, PeerToSignaling, RegisterRequest, ServiceSpec, SignalingEnvelope,
+    actr_to_signaling, discovery_response, get_service_spec_response, peer_to_signaling,
     register_response, signaling_envelope, signaling_to_actr,
 };
 use anyhow::{Context, Result, anyhow};
@@ -110,6 +111,69 @@ impl NetworkServiceDiscovery {
                 Err(Self::as_error("Discovery failed", &error))
             }
             None => Err(anyhow!("Discovery response is missing result")),
+        }
+    }
+
+    /// Get ServiceSpec via GetServiceSpecRequest
+    async fn get_service_spec(
+        &self,
+        actr_type: &ActrType,
+        fingerprint: Option<&str>,
+    ) -> Result<ServiceSpec> {
+        self.ensure_connected().await?;
+        let mut state_guard = self.state.lock().await;
+        let state = state_guard
+            .as_mut()
+            .context("Signaling state not initialized")?;
+
+        let request = GetServiceSpecRequest {
+            actr_type: actr_type.clone(),
+            fingerprint: fingerprint.map(|s| s.to_string()),
+        };
+        let payload = actr_to_signaling::Payload::GetServiceSpecRequest(request);
+        let envelope =
+            Self::build_envelope(signaling_envelope::Flow::ActrToServer(ActrToSignaling {
+                source: state.actr_id.clone(),
+                credential: state.credential.clone(),
+                payload: Some(payload),
+            }))?;
+
+        let result = match Self::send_envelope(&mut state.socket, envelope).await {
+            Ok(()) => loop {
+                let envelope = Self::read_envelope(&mut state.socket).await?;
+                match envelope.flow {
+                    Some(signaling_envelope::Flow::ServerToActr(server)) => match server.payload {
+                        Some(signaling_to_actr::Payload::GetServiceSpecResponse(response)) => {
+                            break Self::handle_get_service_spec_response(response);
+                        }
+                        Some(signaling_to_actr::Payload::Error(error)) => {
+                            break Err(Self::as_error("GetServiceSpec failed", &error));
+                        }
+                        _ => {}
+                    },
+                    Some(signaling_envelope::Flow::EnvelopeError(error)) => {
+                        break Err(Self::as_error("GetServiceSpec failed", &error));
+                    }
+                    _ => {}
+                }
+            },
+            Err(err) => Err(err),
+        };
+        if result.is_err() {
+            *state_guard = None;
+        }
+        result
+    }
+
+    fn handle_get_service_spec_response(
+        response: actr_protocol::GetServiceSpecResponse,
+    ) -> Result<ServiceSpec> {
+        match response.result {
+            Some(get_service_spec_response::Result::Success(spec)) => Ok(spec),
+            Some(get_service_spec_response::Result::Error(error)) => {
+                Err(Self::as_error("GetServiceSpec failed", &error))
+            }
+            None => Err(anyhow!("GetServiceSpec response is missing result")),
         }
     }
 
@@ -238,10 +302,25 @@ impl NetworkServiceDiscovery {
         let without_scheme = uri
             .strip_prefix("actr://")
             .ok_or_else(|| anyhow!("Invalid actr:// URI: {uri}"))?;
+
+        // Handle format: actr://realm:manufacturer+name@version/
+        // or: actr://manufacturer+name/
+        // or: actr://name/
         let name_end = without_scheme
             .find(|c| ['/', '?'].contains(&c))
             .unwrap_or(without_scheme.len());
-        let name = without_scheme[..name_end].trim();
+        let mut name = without_scheme[..name_end].trim();
+
+        // Remove @version suffix if present
+        if let Some(at_pos) = name.find('@') {
+            name = &name[..at_pos];
+        }
+
+        // Remove realm: prefix if present (e.g., "5:acme+EchoService" -> "acme+EchoService")
+        if let Some(colon_pos) = name.find(':') {
+            name = &name[colon_pos + 1..];
+        }
+
         if name.is_empty() {
             return Err(anyhow!("Invalid actr:// URI: {uri}"));
         }
@@ -369,11 +448,32 @@ impl ServiceDiscovery for NetworkServiceDiscovery {
         });
 
         let entry = entry.ok_or_else(|| anyhow!("Service not found: {uri}"))?;
-        let info = ServiceInfo::from(entry);
+        let info = ServiceInfo::from(entry.clone());
+
+        // Try to get ServiceSpec with proto files
+        let proto_files = match self
+            .get_service_spec(&entry.actr_type, Some(entry.service_fingerprint.as_str()))
+            .await
+        {
+            Ok(spec) => spec
+                .protobufs
+                .into_iter()
+                .map(|proto| ProtoFile {
+                    name: proto.package.clone(),
+                    path: std::path::PathBuf::from(format!("{}.proto", proto.package)),
+                    content: proto.content,
+                    services: Vec::new(),
+                })
+                .collect(),
+            Err(e) => {
+                tracing::warn!("Failed to get ServiceSpec for {uri}: {e}");
+                Vec::new()
+            }
+        };
 
         Ok(ServiceDetails {
             info,
-            proto_files: Vec::new(),
+            proto_files,
             dependencies: Vec::new(),
         })
     }
@@ -400,9 +500,29 @@ impl ServiceDiscovery for NetworkServiceDiscovery {
     }
 
     async fn get_service_proto(&self, uri: &str) -> Result<Vec<ProtoFile>> {
-        let _ = self.parse_actr_uri(uri)?;
-        Err(anyhow!(
-            "Proto export is not available via signaling discovery yet"
-        ))
+        let (manufacturer, name) = self.parse_actr_uri(uri)?;
+
+        // Build ActrType for the request
+        let actr_type = ActrType {
+            manufacturer: manufacturer.unwrap_or_default(),
+            name,
+        };
+
+        // Get ServiceSpec
+        let spec = self.get_service_spec(&actr_type, None).await?;
+
+        // Convert protobufs to ProtoFile
+        let proto_files = spec
+            .protobufs
+            .into_iter()
+            .map(|proto| ProtoFile {
+                name: proto.package.clone(),
+                path: std::path::PathBuf::from(format!("{}.proto", proto.package)),
+                content: proto.content,
+                services: Vec::new(),
+            })
+            .collect();
+
+        Ok(proto_files)
     }
 }

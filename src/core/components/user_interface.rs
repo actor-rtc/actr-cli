@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use dialoguer::{Confirm, Select, theme::ColorfulTheme};
 use std::io::{self, Write};
 
-use crate::core::{ProgressBar, ServiceInfo, UserInterface, ActrCliError};
+use crate::core::{ActrCliError, ProgressBar, ServiceInfo, UserInterface};
 
 pub struct ConsoleUI;
 
