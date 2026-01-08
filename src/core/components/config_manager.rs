@@ -87,18 +87,16 @@ impl ConfigManager for TomlConfigManager {
         }
 
         // Add actr_type attribute
-        let actr_type_repr = spec
-            .actr_type
-            .clone()
-            .ok_or_else(|| anyhow::anyhow!("Actr type is required for dependency: {}", spec.alias))?
-            .to_string_repr();
-        if actr_type_repr.is_empty() {
-            return Err(anyhow::anyhow!(
-                "Actr type is required for dependency: {}",
-                spec.alias
-            ));
+        if let Some(actr_type) = &spec.actr_type {
+            let actr_type_repr = actr_type.to_string_repr();
+            if actr_type_repr.is_empty() {
+                return Err(anyhow::anyhow!(
+                    "Actr type is required for dependency: {}",
+                    spec.alias
+                ));
+            }
+            dep_table.insert("actr_type", Value::from(actr_type_repr));
         }
-        dep_table.insert("actr_type", Value::from(actr_type_repr));
 
         if let Some(fingerprint) = &spec.fingerprint {
             dep_table.insert("fingerprint", Value::from(fingerprint.as_str()));
