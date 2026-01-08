@@ -91,7 +91,7 @@ impl CacheManager for DefaultCacheManager {
             Ok(None)
         } else {
             Ok(Some(CachedProto {
-                uri: uri.to_string(),
+                // uri: uri.to_string(),
                 files,
                 fingerprint: Fingerprint {
                     algorithm: "sha256".to_string(),

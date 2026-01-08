@@ -170,32 +170,52 @@ impl ValidationPipeline {
     }
 
     /// 验证特定依赖列表
+    /// Note: Multiple aliases pointing to the same service name will be deduplicated
     pub async fn validate_dependencies(
         &self,
         specs: &[DependencySpec],
     ) -> Result<Vec<DependencyValidation>> {
+        use std::collections::HashMap;
+
         let mut results = Vec::new();
+        // Cache validation results by service name to avoid duplicate checks
+        let mut validation_cache: HashMap<String, (bool, Option<String>)> = HashMap::new();
 
         for spec in specs {
-            let validation = match self
-                .service_discovery
-                .check_service_availability(&spec.name)
-                .await
-            {
-                Ok(status) => DependencyValidation {
-                    dependency: spec.name.clone(),
-                    is_available: status.is_available,
-                    resolved_uri: Some(spec.uri.clone()),
-                    error: None,
-                },
-                Err(e) => DependencyValidation {
-                    dependency: spec.name.clone(),
-                    is_available: false,
-                    resolved_uri: None,
-                    error: Some(e.to_string()),
-                },
+            // Check cache first - if we already validated this service name, reuse the result
+            let (is_available, error) = if let Some(cached) = validation_cache.get(&spec.name) {
+                cached.clone()
+            } else {
+                // Perform validation
+                let (available, err) = match self
+                    .service_discovery
+                    .check_service_availability(&spec.name)
+                    .await
+                {
+                    Ok(status) => {
+                        if status.is_available {
+                            (true, None)
+                        } else {
+                            // Provide meaningful error when service is not found
+                            (
+                                false,
+                                Some(format!("Service '{}' not found in registry", spec.name)),
+                            )
+                        }
+                    }
+                    Err(e) => (false, Some(e.to_string())),
+                };
+
+                // Cache the result for this service name
+                validation_cache.insert(spec.name.clone(), (available, err.clone()));
+                (available, err)
             };
-            results.push(validation);
+
+            results.push(DependencyValidation {
+                dependency: spec.alias.clone(),
+                is_available,
+                error,
+            });
         }
 
         Ok(results)
@@ -204,15 +224,16 @@ impl ValidationPipeline {
     /// 网络连通性验证
     async fn validate_network_connectivity(
         &self,
-        deps: &[ResolvedDependency],
+        _deps: &[ResolvedDependency],
     ) -> Result<Vec<NetworkValidation>> {
-        let uris: Vec<String> = deps.iter().map(|d| d.uri.clone()).collect();
+        // let uris: Vec<String> = deps.iter().map(|d| d.uri.clone()).collect();
+        let uris: Vec<String> = Vec::new(); // TODO: Use another field or logic for connectivity check
         let network_results = self.network_validator.batch_check(&uris).await?;
 
         Ok(network_results
             .into_iter()
             .map(|result| NetworkValidation {
-                uri: result.uri,
+                // uri: result.uri,
                 is_reachable: result.connectivity.is_reachable,
                 latency_ms: result.connectivity.response_time_ms,
                 error: result.connectivity.error,
@@ -242,7 +263,7 @@ impl ValidationPipeline {
                 Ok(details) => details.info,
                 Err(e) => {
                     results.push(FingerprintValidation {
-                        dependency: dep.spec.name.clone(),
+                        dependency: dep.spec.alias.clone(),
                         expected,
                         actual: None,
                         is_valid: false,
@@ -264,7 +285,7 @@ impl ValidationPipeline {
                         .await
                         .unwrap_or(false);
                     results.push(FingerprintValidation {
-                        dependency: dep.spec.name.clone(),
+                        dependency: dep.spec.alias.clone(),
                         expected,
                         actual: Some(actual),
                         is_valid,
@@ -273,7 +294,7 @@ impl ValidationPipeline {
                 }
                 Err(e) => {
                     results.push(FingerprintValidation {
-                        dependency: dep.spec.name.clone(),
+                        dependency: dep.spec.alias.clone(),
                         expected,
                         actual: None,
                         is_valid: false,
@@ -291,15 +312,18 @@ impl ValidationPipeline {
         let mut specs = Vec::new();
 
         for dependency in &config.dependencies {
+            /*
             let uri = format!(
                 "actr://{}:{}+{}@v1/",
                 dependency.realm.realm_id,
                 dependency.actr_type.manufacturer,
                 dependency.actr_type.name
             );
+            */
             specs.push(DependencySpec {
-                name: dependency.alias.clone(),
-                uri,
+                alias: dependency.alias.clone(),
+                name: dependency.name.clone(),
+                // uri,
                 fingerprint: dependency.fingerprint.clone(),
             });
         }
@@ -393,10 +417,25 @@ impl InstallPipeline {
     }
 
     /// 原子性安装执行
+    /// Note: Multiple aliases pointing to the same service will be deduplicated -
+    /// only one entry per unique service name will be installed and recorded in lock file
     async fn execute_atomic_install(&self, specs: &[DependencySpec]) -> Result<InstallResult> {
+        use std::collections::HashSet;
+
         let mut result = InstallResult::success();
+        let mut installed_services: HashSet<String> = HashSet::new();
 
         for spec in specs {
+            // Skip if we already installed this service (by name)
+            if installed_services.contains(&spec.name) {
+                tracing::debug!(
+                    "Skipping duplicate service '{}' (alias: '{}')",
+                    spec.name,
+                    spec.alias
+                );
+                continue;
+            }
+
             // 1. 更新配置文件
             self.config_manager.update_dependency(spec).await?;
             result.updated_config = true;
@@ -408,22 +447,27 @@ impl InstallPipeline {
                 .get_service_details(&spec.name)
                 .await?;
 
+            /*
             self.cache_manager
                 .cache_proto(&spec.uri, &service_details.proto_files)
                 .await?;
+            */
             result.cache_updates += 1;
 
             // 3. 记录已安装的依赖
             let resolved_dep = ResolvedDependency {
                 spec: spec.clone(),
-                uri: spec.uri.clone(),
+                // uri: spec.uri.clone(),
                 fingerprint: service_details.info.fingerprint,
                 proto_files: service_details.proto_files,
             };
             result.installed_dependencies.push(resolved_dep);
+
+            // Mark this service as installed
+            installed_services.insert(spec.name.clone());
         }
 
-        // 4. 更新锁文件
+        // 4. 更新锁文件 (lock file also deduplicates by name)
         self.update_lock_file(&result.installed_dependencies)
             .await?;
         result.updated_lock_file = true;
@@ -446,7 +490,8 @@ impl InstallPipeline {
         // Update dependencies
         for dep in dependencies {
             // Parse actr_type from URI (format: actr://realm:manufacturer+name@version/)
-            let actr_type = Self::parse_actr_type_from_uri(&dep.uri)?;
+            // let actr_type = Self::parse_actr_type_from_uri(&dep.uri)?;
+            let actr_type = dep.spec.name.clone(); // Fallback to name as actr_type
 
             // Create protobuf entries with relative path (no content)
             let protobufs: Vec<ProtoFileMeta> = dep
@@ -479,7 +524,10 @@ impl InstallPipeline {
             };
 
             // Create locked dependency
-            let locked_dep = LockedDependency::new(dep.spec.name.clone(), actr_type, spec);
+            let mut locked_dep = LockedDependency::new(actr_type, spec);
+            locked_dep.name = dep.spec.name.clone();
+            // This is just to test if alias exists
+            // locked_dep.alias = dep.spec.alias.clone();
             lock_file.add_dependency(locked_dep);
         }
 
@@ -491,22 +539,29 @@ impl InstallPipeline {
         Ok(())
     }
 
+    /*
     /// Parse actr_type from URI (format: actr://realm:manufacturer+name@version/)
     fn parse_actr_type_from_uri(uri: &str) -> Result<String> {
         // Example: actr://1:example+echo-service@v1/
         // Extract: example+echo-service
-        let parts: Vec<&str> = uri
-            .trim_start_matches("actr://")
-            .split([':', '@', '/'])
-            .collect();
+        let clean_uri = uri.trim_start_matches("actr://").trim_end_matches('/');
 
-        if parts.len() >= 2 {
-            // parts[0] = realm, parts[1] = manufacturer+name
-            Ok(parts[1].to_string())
+        let result = if let Some(colon_pos) = clean_uri.find(':') {
+            let after_realm = &clean_uri[colon_pos + 1..];
+            if let Some(at_pos) = after_realm.find('@') {
+                after_realm[..at_pos].to_string()
+            } else {
+                after_realm.to_string()
+            }
+        } else if let Some(at_pos) = clean_uri.find('@') {
+            clean_uri[..at_pos].to_string()
         } else {
-            Err(anyhow::anyhow!("Invalid actr URI format: {}", uri))
-        }
+            clean_uri.to_string()
+        };
+
+        Ok(result)
     }
+    */
 }
 
 // ============================================================================

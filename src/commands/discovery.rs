@@ -262,7 +262,7 @@ impl DiscoveryCommand {
         if let Some(desc) = &service.description {
             println!("📝 Description: {desc}");
         }
-        println!("🔗 URI: {}", service.uri);
+        // println!("🔗 URI: {}", service.uri);
         println!("🔐 Fingerprint: {}", service.fingerprint);
         let time = service
             .published_at
@@ -293,7 +293,7 @@ impl DiscoveryCommand {
         println!("════════════════════════════════════════");
 
         println!("🏷️  Service Name: {}", details.info.name);
-        println!("🔗 URI: {}", details.info.uri);
+        // println!("🔗 URI: {}", details.info.uri);
         println!("🔐 Fingerprint: {}", details.info.fingerprint);
 
         if let Some(published_at) = details.info.published_at {
@@ -384,27 +384,56 @@ impl DiscoveryCommand {
 
         // Convert to dependency spec
         let dependency_spec = DependencySpec {
+            alias: service.name.clone(),
             name: service.name.clone(),
-            uri: service.uri.clone(),
+            // uri: service.uri.clone(),
             fingerprint: Some(service.fingerprint.clone()),
         };
 
-        println!("📝 Adding {} to configuration file...", service.name);
+        // Check if a dependency with the same name already exists
+        let config = config_manager
+            .load_config(
+                config_manager
+                    .get_project_root()
+                    .join("Actr.toml")
+                    .as_path(),
+            )
+            .await?;
 
-        // Backup configuration
-        let backup = config_manager.backup_config().await?;
+        // Check for duplicate dependency by name
+        let existing_dep = config
+            .dependencies
+            .iter()
+            .find(|dep| dep.name == service.name);
 
-        // Update configuration
-        match config_manager.update_dependency(&dependency_spec).await {
-            Ok(_) => {
-                println!("✅ Added {} to configuration file", service.name);
-            }
-            Err(e) => {
-                config_manager.restore_backup(backup).await?;
-                return Err(ActrCliError::Config {
-                    message: format!("Configuration update failed: {e}"),
+        let mut backup = None;
+        if let Some(existing) = existing_dep {
+            println!(
+                "ℹ️  Dependency with name '{}' already exists (alias: '{}')",
+                service.name, existing.alias
+            );
+            println!("   Skipping configuration update");
+            // Still proceed with installation if user wants
+        } else {
+            println!("📝 Adding {} to configuration file...", service.name);
+
+            // Backup configuration
+            backup = Some(config_manager.backup_config().await?);
+
+            // Update configuration
+            match config_manager.update_dependency(&dependency_spec).await {
+                Ok(_) => {
+                    println!("✅ Added {} to configuration file", service.name);
                 }
-                .into());
+                Err(e) => {
+                    if let Some(ref backup_val) = backup {
+                        config_manager.restore_backup(backup_val.clone()).await?;
+                    }
+                    return Err(ActrCliError::Config {
+                        message: format!("Configuration update failed: {e}"),
+                    }
+                    .into());
+                }
             }
         }
 
@@ -412,7 +441,9 @@ impl DiscoveryCommand {
         println!();
         println!("🔍 Verifying new dependency...");
         println!("ℹ️ check-first validation is not implemented yet; skipping.");
-        config_manager.remove_backup(backup).await?;
+        if let Some(backup_val) = backup {
+            config_manager.remove_backup(backup_val).await?;
+        }
 
         // Ask if user wants to install immediately
         println!();

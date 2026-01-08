@@ -35,6 +35,7 @@ impl TomlConfigManager {
             .with_context(|| format!("Failed to write config file: {}", path.display()))
     }
 
+    /*
     fn actr_type_from_uri(uri: &str) -> Option<String> {
         let without_scheme = uri.strip_prefix("actr://")?;
         let name_end = without_scheme
@@ -59,6 +60,7 @@ impl TomlConfigManager {
             Some(name.to_string())
         }
     }
+    */
 
     fn build_backup_path(&self) -> Result<PathBuf> {
         let file_name = self
@@ -104,14 +106,22 @@ impl ConfigManager for TomlConfigManager {
         }
 
         let mut dep_table = InlineTable::new();
+
+        // Add name attribute if it differs from alias
+        if spec.name != spec.alias {
+            dep_table.insert("name", Value::from(spec.name.clone()));
+        }
+
         if let Some(fingerprint) = &spec.fingerprint {
+            /*
             if let Some(actr_type) = Self::actr_type_from_uri(&spec.uri) {
                 dep_table.insert("actr_type", Value::from(actr_type));
             }
+            */
             dep_table.insert("fingerprint", Value::from(fingerprint.as_str()));
         }
 
-        doc["dependencies"][&spec.name] = Item::Value(Value::InlineTable(dep_table));
+        doc["dependencies"][&spec.alias] = Item::Value(Value::InlineTable(dep_table));
 
         self.write_config_string(&self.config_path, &doc.to_string())
             .await
@@ -141,11 +151,13 @@ impl ConfigManager for TomlConfigManager {
             if dependency.alias.trim().is_empty() {
                 errors.push("dependency alias is required".to_string());
             }
-            if dependency.actr_type.name.trim().is_empty() {
-                errors.push(format!(
-                    "dependency {} has an empty actr_type name",
-                    dependency.alias
-                ));
+            if let Some(actr_type) = &dependency.actr_type {
+                if actr_type.name.trim().is_empty() {
+                    errors.push(format!(
+                        "dependency {} has an empty actr_type name",
+                        dependency.alias
+                    ));
+                }
             }
         }
 

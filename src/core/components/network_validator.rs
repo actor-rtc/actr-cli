@@ -22,7 +22,7 @@ impl Default for DefaultNetworkValidator {
 
 #[async_trait]
 impl NetworkValidator for DefaultNetworkValidator {
-    async fn check_connectivity(&self, _uri: &str) -> Result<ConnectivityStatus> {
+    async fn check_connectivity(&self, _service_name: &str) -> Result<ConnectivityStatus> {
         // For now, assume all connections are reachable
         Ok(ConnectivityStatus {
             is_reachable: true,
@@ -46,9 +46,9 @@ impl NetworkValidator for DefaultNetworkValidator {
 
     async fn batch_check(&self, uris: &[String]) -> Result<Vec<NetworkCheckResult>> {
         let mut results = Vec::new();
-        for uri in uris {
+        for _uri in uris {
             results.push(NetworkCheckResult {
-                uri: uri.clone(),
+                // uri: uri.clone(),
                 connectivity: ConnectivityStatus {
                     is_reachable: true,
                     response_time_ms: Some(10),

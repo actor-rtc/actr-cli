@@ -174,15 +174,16 @@ impl InstallCommand {
             let connectivity = install_pipeline
                 .validation_pipeline()
                 .network_validator()
-                .check_connectivity(&spec.uri)
+                .check_connectivity(&spec.name)
                 .await?;
             if connectivity.is_reachable {
                 println!("      → ✅ 连接成功");
             } else {
                 println!("      → ❌ 连接失败");
                 return Err(anyhow::anyhow!(
-                    "Network connectivity test failed for {}",
-                    spec.name
+                    "Network connectivity test failed for {} ({})",
+                    spec.name,
+                    spec.alias
                 ));
             }
 
@@ -197,8 +198,9 @@ impl InstallCommand {
 
             // Create dependency spec with resolved info
             let resolved_spec = DependencySpec {
+                alias: spec.alias.clone(),
                 name: spec.name.clone(),
-                uri: spec.uri.clone(),
+                // uri: spec.uri.clone(),
                 fingerprint: Some(service_details.info.fingerprint.clone()),
             };
 
@@ -264,7 +266,7 @@ impl InstallCommand {
 
         println!("🔍 阶段1: 完整验证");
         for spec in &dependency_specs {
-            println!("  ├─ 📋 解析依赖: {}", spec.name);
+            println!("  ├─ 📋 解析依赖: {}", spec.alias);
         }
 
         // Get install pipeline
@@ -332,10 +334,17 @@ impl InstallCommand {
         }
 
         // Create dependency entry
-        // Format: alias = { actr_type = "manufacturer+name" }
-        let actr_type = self.extract_actr_type_from_uri(&spec.uri);
+        // Format: alias = { name = "...", actr_type = "manufacturer+name" }
+        // let actr_type = self.extract_actr_type_from_uri(&spec.uri);
+        let actr_type = spec.name.clone(); // Fallback to name
 
         let mut dep_table = InlineTable::new();
+
+        // Add name attribute if it differs from alias
+        if spec.name != spec.alias {
+            dep_table.insert("name", Value::from(spec.name.clone()));
+        }
+
         dep_table.insert("actr_type", Value::from(actr_type));
 
         // If fingerprint is specified, add it
@@ -343,15 +352,16 @@ impl InstallCommand {
             dep_table.insert("fingerprint", Value::from(fp.as_str()));
         }
 
-        doc["dependencies"][&spec.name] = Item::Value(Value::InlineTable(dep_table));
+        doc["dependencies"][&spec.alias] = Item::Value(Value::InlineTable(dep_table));
 
         // Write back
         fs::write(actr_toml_path, doc.to_string())?;
-        tracing::info!("Updated Actr.toml with dependency: {}", spec.name);
+        tracing::info!("Updated Actr.toml with dependency: {}", spec.alias);
 
         Ok(())
     }
 
+    /*
     /// Extract actr_type from URI
     /// Format: actr://realm:manufacturer+name@version/ -> manufacturer+name
     fn extract_actr_type_from_uri(&self, uri: &str) -> String {
@@ -371,6 +381,7 @@ impl InstallCommand {
             clean_uri.to_string()
         }
     }
+    */
 
     /// Parse new package specs
     fn parse_new_packages(&self) -> Result<Vec<DependencySpec>> {
@@ -420,8 +431,9 @@ impl InstallCommand {
         };
 
         Ok(DependencySpec {
+            alias: service_name.clone(),
             name: service_name,
-            uri: uri.to_string(),
+            // uri: uri.to_string(),
             fingerprint,
         })
     }
@@ -458,11 +470,12 @@ impl InstallCommand {
 
         let service_name = parts[0].to_string();
         let _tag = parts[1].to_string();
-        let uri = format!("actr://{service_name}/");
+        // let uri = format!("actr://{service_name}/");
 
         Ok(DependencySpec {
+            alias: service_name.clone(),
             name: service_name,
-            uri,
+            // uri,
             fingerprint: None,
         })
     }
@@ -470,11 +483,12 @@ impl InstallCommand {
     /// Parse simple spec (service-name)
     fn parse_simple_spec(&self, spec: &str) -> Result<DependencySpec> {
         let service_name = spec.to_string();
-        let uri = format!("actr://{service_name}/");
+        // let uri = format!("actr://{service_name}/");
 
         Ok(DependencySpec {
+            alias: service_name.clone(),
             name: service_name,
-            uri,
+            // uri,
             fingerprint: None,
         })
     }
@@ -500,15 +514,18 @@ impl InstallCommand {
         let mut specs = Vec::new();
 
         for dependency in &config.dependencies {
+            /*
             let uri = format!(
                 "actr://{}:{}+{}@v1/",
                 dependency.realm.realm_id,
                 dependency.actr_type.manufacturer,
                 dependency.actr_type.name
             );
+            */
             specs.push(DependencySpec {
-                name: dependency.alias.clone(),
-                uri,
+                alias: dependency.alias.clone(),
+                name: dependency.name.clone(),
+                // uri,
                 fingerprint: dependency.fingerprint.clone(),
             });
         }
@@ -562,8 +579,9 @@ mod tests {
         let cmd = InstallCommand::default();
         let spec = cmd.parse_simple_spec("user-service").unwrap();
 
+        assert_eq!(spec.alias, "user-service");
         assert_eq!(spec.name, "user-service");
-        assert_eq!(spec.uri, "actr://user-service/");
+        // assert_eq!(spec.uri, "actr://user-service/");
         assert_eq!(spec.fingerprint, None);
     }
 
@@ -572,8 +590,9 @@ mod tests {
         let cmd = InstallCommand::default();
         let spec = cmd.parse_versioned_spec("user-service@1.2.0").unwrap();
 
+        assert_eq!(spec.alias, "user-service");
         assert_eq!(spec.name, "user-service");
-        assert_eq!(spec.uri, "actr://user-service/");
+        // assert_eq!(spec.uri, "actr://user-service/");
         assert_eq!(spec.fingerprint, None);
     }
 
@@ -582,8 +601,9 @@ mod tests {
         let cmd = InstallCommand::default();
         let spec = cmd.parse_actr_uri("actr://user-service/").unwrap();
 
+        assert_eq!(spec.alias, "user-service");
         assert_eq!(spec.name, "user-service");
-        assert_eq!(spec.uri, "actr://user-service/");
+        // assert_eq!(spec.uri, "actr://user-service/");
         assert_eq!(spec.fingerprint, None);
     }
 
@@ -594,11 +614,14 @@ mod tests {
             .parse_actr_uri("actr://user-service/?version=1.2.0&fingerprint=sha256:abc123")
             .unwrap();
 
+        assert_eq!(spec.alias, "user-service");
         assert_eq!(spec.name, "user-service");
+        /*
         assert_eq!(
             spec.uri,
             "actr://user-service/?version=1.2.0&fingerprint=sha256:abc123"
         );
+        */
         assert_eq!(spec.fingerprint, Some("sha256:abc123".to_string()));
     }
 }

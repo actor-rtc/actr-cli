@@ -34,8 +34,9 @@ use std::path::{Path, PathBuf};
 /// 依赖规范
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DependencySpec {
+    pub alias: String,
     pub name: String,
-    pub uri: String,
+    // pub uri: String,
     pub fingerprint: Option<String>,
 }
 
@@ -43,7 +44,7 @@ pub struct DependencySpec {
 #[derive(Debug, Clone)]
 pub struct ResolvedDependency {
     pub spec: DependencySpec,
-    pub uri: String,
+    // pub uri: String,
     pub fingerprint: String,
     pub proto_files: Vec<ProtoFile>,
 }
@@ -75,9 +76,9 @@ pub struct MethodDefinition {
 /// 服务信息
 #[derive(Debug, Clone)]
 pub struct ServiceInfo {
-    /// Service name generate from actr_type.to_string_repr
+    /// Service name (package name)
     pub name: String,
-    pub uri: String,
+    // pub uri: String,
     pub tags: Vec<String>,
     pub fingerprint: String,
     pub published_at: Option<i64>,
@@ -122,13 +123,13 @@ pub struct ConfigValidation {
 pub struct DependencyValidation {
     pub dependency: String,
     pub is_available: bool,
-    pub resolved_uri: Option<String>,
+    // pub resolved_uri: Option<String>,
     pub error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct NetworkValidation {
-    pub uri: String,
+    // pub uri: String,
     pub is_reachable: bool,
     pub latency_ms: Option<u64>,
     pub error: Option<String>,
@@ -326,7 +327,7 @@ pub struct LatencyInfo {
 
 #[derive(Debug, Clone)]
 pub struct NetworkCheckResult {
-    pub uri: String,
+    // pub uri: String,
     pub connectivity: ConnectivityStatus,
     pub health: HealthStatus,
     pub latency: Option<LatencyInfo>,
@@ -408,7 +409,7 @@ pub trait CacheManager: Send + Sync {
 
 #[derive(Debug, Clone)]
 pub struct CachedProto {
-    pub uri: String,
+    // pub uri: String,
     pub files: Vec<ProtoFile>,
     pub fingerprint: Fingerprint,
     pub cached_at: std::time::SystemTime,
@@ -460,16 +461,17 @@ pub trait ProgressBar: Send + Sync {
 
 impl From<TypeEntry> for ServiceInfo {
     fn from(entry: TypeEntry) -> Self {
-        let actr_type = entry.actr_type;
-        let name = actr_type.to_string_repr();
+        let name = entry.name.clone();
+        let _actr_type_repr = entry.actr_type.to_string_repr();
 
-        let uri = format!("actr://{}/", name);
+        // URI includes the actr_type for later extraction during installation/config update
+        // let uri = format!("actr://{}/", actr_type_repr);
 
         let tags = entry.tags.clone();
 
         Self {
             name,
-            uri,
+            // uri: String::new(), // TODO: Remove uri property from ServiceInfo if no longer needed
             tags,
             published_at: entry.published_at,
             fingerprint: entry.service_fingerprint,

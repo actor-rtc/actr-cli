@@ -45,8 +45,9 @@ impl DefaultDependencyResolver {
         }
 
         Ok(DependencySpec {
+            alias: name.to_string(),
             name: name.to_string(),
-            uri: spec.to_string(),
+            // uri: spec.to_string(),
             fingerprint,
         })
     }
@@ -59,10 +60,11 @@ impl DefaultDependencyResolver {
             return Err(anyhow::anyhow!("Invalid package specification: {spec}"));
         }
 
-        let uri = format!("actr://{name}/");
+        // let uri = format!("actr://{name}/");
         Ok(DependencySpec {
+            alias: name.to_string(),
             name: name.to_string(),
-            uri,
+            // uri,
             fingerprint: None,
         })
     }
@@ -72,10 +74,11 @@ impl DefaultDependencyResolver {
         if name.is_empty() {
             return Err(anyhow::anyhow!("Invalid package specification: {spec}"));
         }
-        let uri = format!("actr://{name}/");
+        // let uri = format!("actr://{name}/");
         Ok(DependencySpec {
+            alias: name.to_string(),
             name: name.to_string(),
-            uri,
+            // uri,
             fingerprint: None,
         })
     }
@@ -110,7 +113,7 @@ impl DependencyResolver for DefaultDependencyResolver {
         for spec in specs {
             resolved.push(ResolvedDependency {
                 spec: spec.clone(),
-                uri: spec.uri.clone(),
+                // uri: spec.uri.clone(),
                 fingerprint: spec.fingerprint.clone().unwrap_or_default(),
                 proto_files: Vec::new(),
             });
@@ -124,6 +127,26 @@ impl DependencyResolver for DefaultDependencyResolver {
 
         for i in 0..deps.len() {
             for j in (i + 1)..deps.len() {
+                // Conflict if same alias is used (should not happen if from same Actr.toml, but could from merged configs)
+                if deps[i].spec.alias == deps[j].spec.alias {
+                    // Same alias is always a conflict if they point to different things
+                    if deps[i].spec.name != deps[j].spec.name
+                        || deps[i].fingerprint != deps[j].fingerprint
+                    {
+                        conflicts.push(ConflictReport {
+                            dependency_a: deps[i].spec.alias.clone(),
+                            dependency_b: deps[j].spec.alias.clone(),
+                            conflict_type: ConflictType::VersionConflict,
+                            description: format!(
+                                "Dependency alias '{}' is duplicated with different targets",
+                                deps[i].spec.alias
+                            ),
+                        });
+                        continue;
+                    }
+                }
+
+                // Conflict if same package name has different fingerprints
                 if deps[i].spec.name != deps[j].spec.name {
                     continue;
                 }
@@ -133,8 +156,8 @@ impl DependencyResolver for DefaultDependencyResolver {
                     && deps[i].fingerprint != deps[j].fingerprint
                 {
                     conflicts.push(ConflictReport {
-                        dependency_a: deps[i].spec.name.clone(),
-                        dependency_b: deps[j].spec.name.clone(),
+                        dependency_a: format!("{} ({})", deps[i].spec.name, deps[i].spec.alias),
+                        dependency_b: format!("{} ({})", deps[j].spec.name, deps[j].spec.alias),
                         conflict_type: ConflictType::FingerprintMismatch,
                         description: format!(
                             "Dependency {} has conflicting fingerprints",
@@ -151,8 +174,8 @@ impl DependencyResolver for DefaultDependencyResolver {
     async fn build_dependency_graph(&self, deps: &[ResolvedDependency]) -> Result<DependencyGraph> {
         let mut nodes = Vec::new();
         for dep in deps {
-            if !nodes.contains(&dep.spec.name) {
-                nodes.push(dep.spec.name.clone());
+            if !nodes.contains(&dep.spec.alias) {
+                nodes.push(dep.spec.alias.clone());
             }
         }
 
