@@ -37,23 +37,6 @@ impl DefaultCacheManager {
             .join("remote")
             .join(service_name)
     }
-
-    /// Extract service name from actr:// URI
-    /// Keeps manufacturer part; removes optional realm prefix and @version suffix.
-    fn extract_service_name_from_uri(uri: &str) -> String {
-        let clean_uri = uri.trim_start_matches("actr://").trim_end_matches('/');
-
-        let without_version = clean_uri.split('@').next().unwrap_or(clean_uri);
-
-        if let Some((prefix, rest)) = without_version.split_once(':') {
-            // If prefix is numeric, treat it as realm and strip it; otherwise keep full string.
-            if prefix.chars().all(|c| c.is_ascii_digit()) {
-                return rest.to_string();
-            }
-        }
-
-        without_version.to_string()
-    }
 }
 
 impl Default for DefaultCacheManager {
@@ -64,8 +47,7 @@ impl Default for DefaultCacheManager {
 
 #[async_trait]
 impl CacheManager for DefaultCacheManager {
-    async fn get_cached_proto(&self, uri: &str) -> Result<Option<CachedProto>> {
-        let service_name = Self::extract_service_name_from_uri(uri);
+    async fn get_cached_proto(&self, service_name: &str) -> Result<Option<CachedProto>> {
         let cache_path = self.get_service_proto_dir(&service_name);
 
         if !cache_path.exists() {
@@ -91,7 +73,6 @@ impl CacheManager for DefaultCacheManager {
             Ok(None)
         } else {
             Ok(Some(CachedProto {
-                // uri: uri.to_string(),
                 files,
                 fingerprint: Fingerprint {
                     algorithm: "sha256".to_string(),
@@ -103,9 +84,8 @@ impl CacheManager for DefaultCacheManager {
         }
     }
 
-    async fn cache_proto(&self, uri: &str, files: &[ProtoFile]) -> Result<()> {
-        let service_name = Self::extract_service_name_from_uri(uri);
-        let cache_path = self.get_service_proto_dir(&service_name);
+    async fn cache_proto(&self, service_name: &str, files: &[ProtoFile]) -> Result<()> {
+        let cache_path = self.get_service_proto_dir(service_name);
         std::fs::create_dir_all(&cache_path)?;
 
         for file in files {
@@ -132,9 +112,8 @@ impl CacheManager for DefaultCacheManager {
         Ok(())
     }
 
-    async fn invalidate_cache(&self, uri: &str) -> Result<()> {
-        let service_name = Self::extract_service_name_from_uri(uri);
-        let cache_path = self.get_service_proto_dir(&service_name);
+    async fn invalidate_cache(&self, service_name: &str) -> Result<()> {
+        let cache_path = self.get_service_proto_dir(service_name);
         if cache_path.exists() {
             std::fs::remove_dir_all(&cache_path)?;
         }
@@ -173,37 +152,5 @@ impl CacheManager for DefaultCacheManager {
             hit_rate: 0.0,
             miss_rate: 0.0,
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_extract_service_name_from_uri() {
-        // Test realm:manufacturer+name@version format
-        assert_eq!(
-            DefaultCacheManager::extract_service_name_from_uri("actr://5:acme+EchoService@v1/"),
-            "acme+EchoService"
-        );
-
-        // Test manufacturer+name@version format (no realm)
-        assert_eq!(
-            DefaultCacheManager::extract_service_name_from_uri("actr://acme+EchoService@v1/"),
-            "acme+EchoService"
-        );
-
-        // Test manufacturer+name format (no version)
-        assert_eq!(
-            DefaultCacheManager::extract_service_name_from_uri("actr://acme+EchoService/"),
-            "acme+EchoService"
-        );
-
-        // Test simple name
-        assert_eq!(
-            DefaultCacheManager::extract_service_name_from_uri("actr://EchoService/"),
-            "EchoService"
-        );
     }
 }

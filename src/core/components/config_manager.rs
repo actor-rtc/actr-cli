@@ -1,4 +1,5 @@
 use actr_config::{Config, ConfigParser};
+use actr_protocol::ActrTypeExt;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
@@ -34,33 +35,6 @@ impl TomlConfigManager {
             .await
             .with_context(|| format!("Failed to write config file: {}", path.display()))
     }
-
-    /*
-    fn actr_type_from_uri(uri: &str) -> Option<String> {
-        let without_scheme = uri.strip_prefix("actr://")?;
-        let name_end = without_scheme
-            .find(|c| ['/', '?'].contains(&c))
-            .unwrap_or(without_scheme.len());
-        let mut name = &without_scheme[..name_end];
-
-        // Remove realm: prefix if present (e.g., "5:acme+EchoService@v1" -> "acme+EchoService@v1")
-        if let Some(colon_pos) = name.find(':') {
-            name = &name[colon_pos + 1..];
-        }
-
-        // Remove @version suffix if present (e.g., "acme+EchoService@v1" -> "acme+EchoService")
-        if let Some(at_pos) = name.find('@') {
-            name = &name[..at_pos];
-        }
-
-        let name = name.trim();
-        if name.is_empty() {
-            None
-        } else {
-            Some(name.to_string())
-        }
-    }
-    */
 
     fn build_backup_path(&self) -> Result<PathBuf> {
         let file_name = self
@@ -112,12 +86,13 @@ impl ConfigManager for TomlConfigManager {
             dep_table.insert("name", Value::from(spec.name.clone()));
         }
 
+        // Add actr_type attribute
+        let actr_type_repr = spec.actr_type.to_string_repr();
+        if !actr_type_repr.is_empty() {
+            dep_table.insert("actr_type", Value::from(actr_type_repr));
+        }
+
         if let Some(fingerprint) = &spec.fingerprint {
-            /*
-            if let Some(actr_type) = Self::actr_type_from_uri(&spec.uri) {
-                dep_table.insert("actr_type", Value::from(actr_type));
-            }
-            */
             dep_table.insert("fingerprint", Value::from(fingerprint.as_str()));
         }
 

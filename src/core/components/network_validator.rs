@@ -31,11 +31,11 @@ impl NetworkValidator for DefaultNetworkValidator {
         })
     }
 
-    async fn verify_service_health(&self, _uri: &str) -> Result<HealthStatus> {
+    async fn verify_service_health(&self, _service_name: &str) -> Result<HealthStatus> {
         Ok(HealthStatus::Healthy)
     }
 
-    async fn test_latency(&self, _uri: &str) -> Result<LatencyInfo> {
+    async fn test_latency(&self, _service_name: &str) -> Result<LatencyInfo> {
         Ok(LatencyInfo {
             min_ms: 5,
             max_ms: 20,
@@ -44,11 +44,10 @@ impl NetworkValidator for DefaultNetworkValidator {
         })
     }
 
-    async fn batch_check(&self, uris: &[String]) -> Result<Vec<NetworkCheckResult>> {
+    async fn batch_check(&self, _service_names: &[String]) -> Result<Vec<NetworkCheckResult>> {
         let mut results = Vec::new();
-        for _uri in uris {
+        for _ in _service_names {
             results.push(NetworkCheckResult {
-                // uri: uri.clone(),
                 connectivity: ConnectivityStatus {
                     is_reachable: true,
                     response_time_ms: Some(10),

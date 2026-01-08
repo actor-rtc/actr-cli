@@ -3,6 +3,7 @@
 //! 定义了三个核心操作管道，实现命令间的逻辑复用
 
 use actr_config::{Config, LockFile, LockedDependency, ProtoFileMeta, ServiceSpecMeta};
+use actr_protocol::ActrTypeExt;
 use anyhow::Result;
 use std::sync::Arc;
 
@@ -224,16 +225,14 @@ impl ValidationPipeline {
     /// 网络连通性验证
     async fn validate_network_connectivity(
         &self,
-        _deps: &[ResolvedDependency],
+        deps: &[ResolvedDependency],
     ) -> Result<Vec<NetworkValidation>> {
-        // let uris: Vec<String> = deps.iter().map(|d| d.uri.clone()).collect();
-        let uris: Vec<String> = Vec::new(); // TODO: Use another field or logic for connectivity check
-        let network_results = self.network_validator.batch_check(&uris).await?;
+        let names = deps.iter().map(|d| d.spec.name.clone()).collect::<Vec<_>>();
+        let network_results = self.network_validator.batch_check(&names).await?;
 
         Ok(network_results
             .into_iter()
             .map(|result| NetworkValidation {
-                // uri: result.uri,
                 is_reachable: result.connectivity.is_reachable,
                 latency_ms: result.connectivity.response_time_ms,
                 error: result.connectivity.error,
@@ -312,18 +311,10 @@ impl ValidationPipeline {
         let mut specs = Vec::new();
 
         for dependency in &config.dependencies {
-            /*
-            let uri = format!(
-                "actr://{}:{}+{}@v1/",
-                dependency.realm.realm_id,
-                dependency.actr_type.manufacturer,
-                dependency.actr_type.name
-            );
-            */
             specs.push(DependencySpec {
                 alias: dependency.alias.clone(),
+                actr_type: dependency.actr_type.clone().unwrap(),
                 name: dependency.name.clone(),
-                // uri,
                 fingerprint: dependency.fingerprint.clone(),
             });
         }
@@ -447,17 +438,18 @@ impl InstallPipeline {
                 .get_service_details(&spec.name)
                 .await?;
 
-            /*
             self.cache_manager
-                .cache_proto(&spec.uri, &service_details.proto_files)
+                .cache_proto(&spec.name, &service_details.proto_files)
                 .await?;
-            */
+
             result.cache_updates += 1;
 
             // 3. 记录已安装的依赖
+            let mut resolved_spec = spec.clone();
+            resolved_spec.actr_type = service_details.info.actr_type.clone();
+
             let resolved_dep = ResolvedDependency {
-                spec: spec.clone(),
-                // uri: spec.uri.clone(),
+                spec: resolved_spec,
                 fingerprint: service_details.info.fingerprint,
                 proto_files: service_details.proto_files,
             };
@@ -489,9 +481,7 @@ impl InstallPipeline {
 
         // Update dependencies
         for dep in dependencies {
-            // Parse actr_type from URI (format: actr://realm:manufacturer+name@version/)
-            // let actr_type = Self::parse_actr_type_from_uri(&dep.uri)?;
-            let actr_type = dep.spec.name.clone(); // Fallback to name as actr_type
+            let service_name = dep.spec.name.clone();
 
             // Create protobuf entries with relative path (no content)
             let protobufs: Vec<ProtoFileMeta> = dep
@@ -503,8 +493,8 @@ impl InstallPipeline {
                     } else {
                         format!("{}.proto", pf.name)
                     };
-                    // Path relative to proto/remote/ (e.g., "manufacturer+name/file.proto")
-                    let path = format!("{}/{}", actr_type, file_name);
+                    // Path relative to proto/remote/ (e.g., "service_name/file.proto")
+                    let path = format!("{}/{}", service_name, file_name);
 
                     ProtoFileMeta {
                         path,
@@ -524,10 +514,7 @@ impl InstallPipeline {
             };
 
             // Create locked dependency
-            let mut locked_dep = LockedDependency::new(actr_type, spec);
-            locked_dep.name = dep.spec.name.clone();
-            // This is just to test if alias exists
-            // locked_dep.alias = dep.spec.alias.clone();
+            let locked_dep = LockedDependency::new(dep.spec.actr_type.to_string_repr(), spec);
             lock_file.add_dependency(locked_dep);
         }
 
@@ -538,30 +525,6 @@ impl InstallPipeline {
         tracing::info!("Updated lock file: {} dependencies", dependencies.len());
         Ok(())
     }
-
-    /*
-    /// Parse actr_type from URI (format: actr://realm:manufacturer+name@version/)
-    fn parse_actr_type_from_uri(uri: &str) -> Result<String> {
-        // Example: actr://1:example+echo-service@v1/
-        // Extract: example+echo-service
-        let clean_uri = uri.trim_start_matches("actr://").trim_end_matches('/');
-
-        let result = if let Some(colon_pos) = clean_uri.find(':') {
-            let after_realm = &clean_uri[colon_pos + 1..];
-            if let Some(at_pos) = after_realm.find('@') {
-                after_realm[..at_pos].to_string()
-            } else {
-                after_realm.to_string()
-            }
-        } else if let Some(at_pos) = clean_uri.find('@') {
-            clean_uri[..at_pos].to_string()
-        } else {
-            clean_uri.to_string()
-        };
-
-        Ok(result)
-    }
-    */
 }
 
 // ============================================================================

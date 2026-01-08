@@ -262,7 +262,6 @@ impl DiscoveryCommand {
         if let Some(desc) = &service.description {
             println!("📝 Description: {desc}");
         }
-        // println!("🔗 URI: {}", service.uri);
         println!("🔐 Fingerprint: {}", service.fingerprint);
         let time = service
             .published_at
@@ -293,7 +292,6 @@ impl DiscoveryCommand {
         println!("════════════════════════════════════════");
 
         println!("🏷️  Service Name: {}", details.info.name);
-        // println!("🔗 URI: {}", details.info.uri);
         println!("🔐 Fingerprint: {}", details.info.fingerprint);
 
         if let Some(published_at) = details.info.published_at {
@@ -385,8 +383,8 @@ impl DiscoveryCommand {
         // Convert to dependency spec
         let dependency_spec = DependencySpec {
             alias: service.name.clone(),
+            actr_type: service.actr_type.clone(),
             name: service.name.clone(),
-            // uri: service.uri.clone(),
             fingerprint: Some(service.fingerprint.clone()),
         };
 

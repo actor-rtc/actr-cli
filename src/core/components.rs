@@ -10,7 +10,7 @@ pub mod network_validator;
 pub mod proto_processor;
 pub mod service_discovery;
 pub mod user_interface;
-use actr_protocol::discovery_response::TypeEntry;
+use actr_protocol::{ActrType, discovery_response::TypeEntry};
 pub use cache_manager::DefaultCacheManager;
 pub use config_manager::TomlConfigManager;
 pub use dependency_resolver::DefaultDependencyResolver;
@@ -21,7 +21,6 @@ pub use service_discovery::NetworkServiceDiscovery;
 pub use user_interface::ConsoleUI;
 
 use actr_config::Config;
-use actr_protocol::ActrTypeExt;
 use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -36,7 +35,7 @@ use std::path::{Path, PathBuf};
 pub struct DependencySpec {
     pub alias: String,
     pub name: String,
-    // pub uri: String,
+    pub actr_type: ActrType,
     pub fingerprint: Option<String>,
 }
 
@@ -44,7 +43,6 @@ pub struct DependencySpec {
 #[derive(Debug, Clone)]
 pub struct ResolvedDependency {
     pub spec: DependencySpec,
-    // pub uri: String,
     pub fingerprint: String,
     pub proto_files: Vec<ProtoFile>,
 }
@@ -78,7 +76,7 @@ pub struct MethodDefinition {
 pub struct ServiceInfo {
     /// Service name (package name)
     pub name: String,
-    // pub uri: String,
+    pub actr_type: ActrType,
     pub tags: Vec<String>,
     pub fingerprint: String,
     pub published_at: Option<i64>,
@@ -123,13 +121,11 @@ pub struct ConfigValidation {
 pub struct DependencyValidation {
     pub dependency: String,
     pub is_available: bool,
-    // pub resolved_uri: Option<String>,
     pub error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct NetworkValidation {
-    // pub uri: String,
     pub is_reachable: bool,
     pub latency_ms: Option<u64>,
     pub error: Option<String>,
@@ -298,16 +294,16 @@ pub enum HealthStatus {
 #[async_trait]
 pub trait NetworkValidator: Send + Sync {
     /// 检查连通性
-    async fn check_connectivity(&self, uri: &str) -> Result<ConnectivityStatus>;
+    async fn check_connectivity(&self, service_name: &str) -> Result<ConnectivityStatus>;
 
     /// 验证服务健康状态
-    async fn verify_service_health(&self, uri: &str) -> Result<HealthStatus>;
+    async fn verify_service_health(&self, service_name: &str) -> Result<HealthStatus>;
 
     /// 测试延迟
-    async fn test_latency(&self, uri: &str) -> Result<LatencyInfo>;
+    async fn test_latency(&self, service_name: &str) -> Result<LatencyInfo>;
 
     /// 批量检查
-    async fn batch_check(&self, uris: &[String]) -> Result<Vec<NetworkCheckResult>>;
+    async fn batch_check(&self, service_names: &[String]) -> Result<Vec<NetworkCheckResult>>;
 }
 
 #[derive(Debug, Clone)]
@@ -327,7 +323,6 @@ pub struct LatencyInfo {
 
 #[derive(Debug, Clone)]
 pub struct NetworkCheckResult {
-    // pub uri: String,
     pub connectivity: ConnectivityStatus,
     pub health: HealthStatus,
     pub latency: Option<LatencyInfo>,
@@ -392,13 +387,13 @@ pub struct GenerationResult {
 #[async_trait]
 pub trait CacheManager: Send + Sync {
     /// 获取缓存的Proto
-    async fn get_cached_proto(&self, uri: &str) -> Result<Option<CachedProto>>;
+    async fn get_cached_proto(&self, service_name: &str) -> Result<Option<CachedProto>>;
 
     /// 缓存Proto文件
-    async fn cache_proto(&self, uri: &str, proto: &[ProtoFile]) -> Result<()>;
+    async fn cache_proto(&self, service_name: &str, proto: &[ProtoFile]) -> Result<()>;
 
     /// 失效缓存
-    async fn invalidate_cache(&self, uri: &str) -> Result<()>;
+    async fn invalidate_cache(&self, service_name: &str) -> Result<()>;
 
     /// 清理缓存
     async fn clear_cache(&self) -> Result<()>;
@@ -409,7 +404,6 @@ pub trait CacheManager: Send + Sync {
 
 #[derive(Debug, Clone)]
 pub struct CachedProto {
-    // pub uri: String,
     pub files: Vec<ProtoFile>,
     pub fingerprint: Fingerprint,
     pub cached_at: std::time::SystemTime,
@@ -462,16 +456,12 @@ pub trait ProgressBar: Send + Sync {
 impl From<TypeEntry> for ServiceInfo {
     fn from(entry: TypeEntry) -> Self {
         let name = entry.name.clone();
-        let _actr_type_repr = entry.actr_type.to_string_repr();
-
-        // URI includes the actr_type for later extraction during installation/config update
-        // let uri = format!("actr://{}/", actr_type_repr);
-
         let tags = entry.tags.clone();
+        let actr_type = entry.actr_type.clone();
 
         Self {
             name,
-            // uri: String::new(), // TODO: Remove uri property from ServiceInfo if no longer needed
+            actr_type,
             tags,
             published_at: entry.published_at,
             fingerprint: entry.service_fingerprint,

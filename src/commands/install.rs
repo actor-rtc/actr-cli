@@ -2,14 +2,14 @@
 //!
 //! Implement install flow based on reuse architecture with check-first principle
 
-use anyhow::Result;
-use async_trait::async_trait;
-use clap::Args;
-
 use crate::core::{
     ActrCliError, Command, CommandContext, CommandResult, ComponentType, DependencySpec,
     ErrorReporter, InstallResult,
 };
+use actr_protocol::ActrTypeExt;
+use anyhow::Result;
+use async_trait::async_trait;
+use clap::Args;
 
 /// Install command
 #[derive(Args, Debug)]
@@ -18,7 +18,7 @@ use crate::core::{
     long_about = "Install service dependencies. You can install specific service packages, or install all dependencies configured in Actr.toml"
 )]
 pub struct InstallCommand {
-    /// List of service packages to install (e.g., actr://user-service@1.0.0/)
+    /// List of service packages to install (e.g., user-service)
     #[arg(value_name = "PACKAGE")]
     pub packages: Vec<String>,
 
@@ -151,7 +151,6 @@ impl InstallCommand {
         for package in packages {
             // Phase 1: Check-First validation
             println!("  ├─ 📋 解析依赖规范");
-            let spec = self.parse_package_spec(package)?;
 
             // Service discovery
             println!("  ├─ 🔍 服务发现 (DiscoveryRequest)");
@@ -164,7 +163,7 @@ impl InstallCommand {
             let service_details = install_pipeline
                 .validation_pipeline()
                 .service_discovery()
-                .get_service_details(&spec.name)
+                .get_service_details(package)
                 .await?;
 
             println!("  ├─ 🎯 fingerprint 选择");
@@ -174,16 +173,15 @@ impl InstallCommand {
             let connectivity = install_pipeline
                 .validation_pipeline()
                 .network_validator()
-                .check_connectivity(&spec.name)
+                .check_connectivity(package)
                 .await?;
             if connectivity.is_reachable {
                 println!("      → ✅ 连接成功");
             } else {
                 println!("      → ❌ 连接失败");
                 return Err(anyhow::anyhow!(
-                    "Network connectivity test failed for {} ({})",
-                    spec.name,
-                    spec.alias
+                    "Network connectivity test failed for {}",
+                    package,
                 ));
             }
 
@@ -198,9 +196,9 @@ impl InstallCommand {
 
             // Create dependency spec with resolved info
             let resolved_spec = DependencySpec {
-                alias: spec.alias.clone(),
-                name: spec.name.clone(),
-                // uri: spec.uri.clone(),
+                alias: package.clone(),
+                actr_type: service_details.info.actr_type.clone(),
+                name: package.clone(),
                 fingerprint: Some(service_details.info.fingerprint.clone()),
             };
 
@@ -333,19 +331,19 @@ impl InstallCommand {
             doc["dependencies"] = Item::Table(Table::new());
         }
 
-        // Create dependency entry
-        // Format: alias = { name = "...", actr_type = "manufacturer+name" }
-        // let actr_type = self.extract_actr_type_from_uri(&spec.uri);
-        let actr_type = spec.name.clone(); // Fallback to name
-
         let mut dep_table = InlineTable::new();
 
+        // Create dependency entry
+        // Format: alias = { name = "...", actr_type = "..." }
         // Add name attribute if it differs from alias
         if spec.name != spec.alias {
             dep_table.insert("name", Value::from(spec.name.clone()));
         }
 
-        dep_table.insert("actr_type", Value::from(actr_type));
+        let actr_type = spec.actr_type.to_string_repr();
+        if !actr_type.is_empty() {
+            dep_table.insert("actr_type", Value::from(actr_type));
+        }
 
         // If fingerprint is specified, add it
         if let Some(ref fp) = spec.fingerprint {
@@ -359,138 +357,6 @@ impl InstallCommand {
         tracing::info!("Updated Actr.toml with dependency: {}", spec.alias);
 
         Ok(())
-    }
-
-    /*
-    /// Extract actr_type from URI
-    /// Format: actr://realm:manufacturer+name@version/ -> manufacturer+name
-    fn extract_actr_type_from_uri(&self, uri: &str) -> String {
-        let clean_uri = uri.trim_start_matches("actr://").trim_end_matches('/');
-
-        // Handle realm:manufacturer+name@version format
-        if let Some(colon_pos) = clean_uri.find(':') {
-            let after_realm = &clean_uri[colon_pos + 1..];
-            if let Some(at_pos) = after_realm.find('@') {
-                after_realm[..at_pos].to_string()
-            } else {
-                after_realm.to_string()
-            }
-        } else if let Some(at_pos) = clean_uri.find('@') {
-            clean_uri[..at_pos].to_string()
-        } else {
-            clean_uri.to_string()
-        }
-    }
-    */
-
-    /// Parse new package specs
-    fn parse_new_packages(&self) -> Result<Vec<DependencySpec>> {
-        let mut specs = Vec::new();
-
-        for package_spec in &self.packages {
-            let spec = self.parse_package_spec(package_spec)?;
-            specs.push(spec);
-        }
-
-        Ok(specs)
-    }
-
-    /// Parse single package spec
-    fn parse_package_spec(&self, package_spec: &str) -> Result<DependencySpec> {
-        if package_spec.starts_with("actr://") {
-            // Direct actr:// URI
-            self.parse_actr_uri(package_spec)
-        } else if package_spec.contains('@') {
-            // service-name@version format
-            self.parse_versioned_spec(package_spec)
-        } else {
-            // Simple service name
-            self.parse_simple_spec(package_spec)
-        }
-    }
-
-    /// Parse actr:// URI
-    fn parse_actr_uri(&self, uri: &str) -> Result<DependencySpec> {
-        // Simplified URI parsing, actual implementation should be more strict
-        if !uri.starts_with("actr://") {
-            return Err(anyhow::anyhow!("Invalid actr:// URI: {uri}"));
-        }
-
-        let uri_part = &uri[7..]; // Remove "actr://"
-        let service_name = if let Some(pos) = uri_part.find('/') {
-            uri_part[..pos].to_string()
-        } else {
-            uri_part.to_string()
-        };
-
-        // Extract query parameters (simplified version)
-        let fingerprint = if uri.contains('?') {
-            self.parse_query_params(uri)?
-        } else {
-            None
-        };
-
-        Ok(DependencySpec {
-            alias: service_name.clone(),
-            name: service_name,
-            // uri: uri.to_string(),
-            fingerprint,
-        })
-    }
-
-    /// Parse query parameters
-    fn parse_query_params(&self, uri: &str) -> Result<Option<String>> {
-        if let Some(query_start) = uri.find('?') {
-            let query = &uri[query_start + 1..];
-            let mut fingerprint = None;
-
-            for param in query.split('&') {
-                if let Some((key, value)) = param.split_once('=') {
-                    match key {
-                        "fingerprint" => fingerprint = Some(value.to_string()),
-                        _ => {} // Ignore unknown parameters
-                    }
-                }
-            }
-
-            Ok(fingerprint)
-        } else {
-            Ok(None)
-        }
-    }
-
-    /// Parse versioned spec (service@tag)
-    fn parse_versioned_spec(&self, spec: &str) -> Result<DependencySpec> {
-        let parts: Vec<&str> = spec.split('@').collect();
-        if parts.len() != 2 {
-            return Err(anyhow::anyhow!(
-                "Invalid package specification: {spec}. Use 'service-name@tag'"
-            ));
-        }
-
-        let service_name = parts[0].to_string();
-        let _tag = parts[1].to_string();
-        // let uri = format!("actr://{service_name}/");
-
-        Ok(DependencySpec {
-            alias: service_name.clone(),
-            name: service_name,
-            // uri,
-            fingerprint: None,
-        })
-    }
-
-    /// Parse simple spec (service-name)
-    fn parse_simple_spec(&self, spec: &str) -> Result<DependencySpec> {
-        let service_name = spec.to_string();
-        // let uri = format!("actr://{service_name}/");
-
-        Ok(DependencySpec {
-            alias: service_name.clone(),
-            name: service_name,
-            // uri,
-            fingerprint: None,
-        })
     }
 
     /// Load dependencies from config file
@@ -514,18 +380,10 @@ impl InstallCommand {
         let mut specs = Vec::new();
 
         for dependency in &config.dependencies {
-            /*
-            let uri = format!(
-                "actr://{}:{}+{}@v1/",
-                dependency.realm.realm_id,
-                dependency.actr_type.manufacturer,
-                dependency.actr_type.name
-            );
-            */
             specs.push(DependencySpec {
                 alias: dependency.alias.clone(),
+                actr_type: dependency.actr_type.clone().unwrap_or_default(),
                 name: dependency.name.clone(),
-                // uri,
                 fingerprint: dependency.fingerprint.clone(),
             });
         }
@@ -567,61 +425,5 @@ impl InstallCommand {
 impl Default for InstallCommand {
     fn default() -> Self {
         Self::new(Vec::new(), false, false, false)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_simple_spec() {
-        let cmd = InstallCommand::default();
-        let spec = cmd.parse_simple_spec("user-service").unwrap();
-
-        assert_eq!(spec.alias, "user-service");
-        assert_eq!(spec.name, "user-service");
-        // assert_eq!(spec.uri, "actr://user-service/");
-        assert_eq!(spec.fingerprint, None);
-    }
-
-    #[test]
-    fn test_parse_versioned_spec() {
-        let cmd = InstallCommand::default();
-        let spec = cmd.parse_versioned_spec("user-service@1.2.0").unwrap();
-
-        assert_eq!(spec.alias, "user-service");
-        assert_eq!(spec.name, "user-service");
-        // assert_eq!(spec.uri, "actr://user-service/");
-        assert_eq!(spec.fingerprint, None);
-    }
-
-    #[test]
-    fn test_parse_actr_uri_simple() {
-        let cmd = InstallCommand::default();
-        let spec = cmd.parse_actr_uri("actr://user-service/").unwrap();
-
-        assert_eq!(spec.alias, "user-service");
-        assert_eq!(spec.name, "user-service");
-        // assert_eq!(spec.uri, "actr://user-service/");
-        assert_eq!(spec.fingerprint, None);
-    }
-
-    #[test]
-    fn test_parse_actr_uri_with_params() {
-        let cmd = InstallCommand::default();
-        let spec = cmd
-            .parse_actr_uri("actr://user-service/?version=1.2.0&fingerprint=sha256:abc123")
-            .unwrap();
-
-        assert_eq!(spec.alias, "user-service");
-        assert_eq!(spec.name, "user-service");
-        /*
-        assert_eq!(
-            spec.uri,
-            "actr://user-service/?version=1.2.0&fingerprint=sha256:abc123"
-        );
-        */
-        assert_eq!(spec.fingerprint, Some("sha256:abc123".to_string()));
     }
 }
