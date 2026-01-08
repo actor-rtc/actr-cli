@@ -308,16 +308,16 @@ impl ValidationPipeline {
 
     /// 从配置中提取依赖规范
     fn extract_dependency_specs(&self, config: &Config) -> Result<Vec<DependencySpec>> {
-        let mut specs = Vec::new();
-
-        for dependency in &config.dependencies {
-            specs.push(DependencySpec {
+        let specs: Vec<DependencySpec> = config
+            .dependencies
+            .iter()
+            .map(|dependency| DependencySpec {
                 alias: dependency.alias.clone(),
-                actr_type: dependency.actr_type.clone().unwrap(),
+                actr_type: dependency.actr_type.clone(),
                 name: dependency.name.clone(),
                 fingerprint: dependency.fingerprint.clone(),
-            });
-        }
+            })
+            .collect();
 
         Ok(specs)
     }
@@ -446,7 +446,7 @@ impl InstallPipeline {
 
             // 3. 记录已安装的依赖
             let mut resolved_spec = spec.clone();
-            resolved_spec.actr_type = service_details.info.actr_type.clone();
+            resolved_spec.actr_type = Some(service_details.info.actr_type.clone());
 
             let resolved_dep = ResolvedDependency {
                 spec: resolved_spec,
@@ -514,7 +514,10 @@ impl InstallPipeline {
             };
 
             // Create locked dependency
-            let locked_dep = LockedDependency::new(dep.spec.actr_type.to_string_repr(), spec);
+            let actr_type = dep.spec.actr_type.clone().ok_or_else(|| {
+                anyhow::anyhow!("Actr type is required for dependency: {}", service_name)
+            })?;
+            let locked_dep = LockedDependency::new(actr_type.to_string_repr(), spec);
             lock_file.add_dependency(locked_dep);
         }
 

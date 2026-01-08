@@ -7,6 +7,7 @@ types = ["acme+EchoService"]
 
 [dependencies]
 echo-real-server-v1 = { actr_type = "acme+EchoService", fingerprint = "service_semantic:0d0d204d724cafc1cb8fd5d6f68ca683d9f6546c6e70deab75781a2f4230a755" }
+echo-real-server = { name = "echo-real-server-v1", actr_type = "acme+EchoService", fingerprint = "service_semantic:0d0d204d724cafc1cb8fd5d6f68ca683d9f6546c6e70deab75781a2f4230a755" }
 
 
 [package]

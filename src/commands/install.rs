@@ -6,7 +6,6 @@ use crate::core::{
     ActrCliError, Command, CommandContext, CommandResult, ComponentType, DependencySpec,
     ErrorReporter, InstallResult,
 };
-use actr_protocol::ActrTypeExt;
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Args;
@@ -148,16 +147,17 @@ impl InstallCommand {
     ) -> Result<CommandResult> {
         println!("actr install {}", packages.join(" "));
 
+        let install_pipeline = {
+            let mut container = context.container.lock().unwrap();
+            container.get_install_pipeline()?
+        };
+
+        let mut resolved_specs = Vec::new();
+
+        println!("🔍 Phase 1: Complete Validation");
         for package in packages {
             // Phase 1: Check-First validation
-            println!("  ├─ 📋 解析依赖规范");
-
-            // Service discovery
-            println!("  ├─ 🔍 服务发现 (DiscoveryRequest)");
-            let install_pipeline = {
-                let mut container = context.container.lock().unwrap();
-                container.get_install_pipeline()?
-            };
+            println!("  ├─ 📋 Parsing dependency spec: {}", package);
 
             // Discover service details
             let service_details = install_pipeline
@@ -166,74 +166,71 @@ impl InstallCommand {
                 .get_service_details(package)
                 .await?;
 
-            println!("  ├─ 🎯 fingerprint 选择");
-            println!("      → fingerprint: {}", service_details.info.fingerprint);
+            println!(
+                "  ├─ 🔍 Service discovery: fingerprint {}",
+                service_details.info.fingerprint
+            );
 
-            println!("  ├─ 🌐 网络连通性测试");
+            // Connectivity check
             let connectivity = install_pipeline
                 .validation_pipeline()
                 .network_validator()
                 .check_connectivity(package)
                 .await?;
+
             if connectivity.is_reachable {
-                println!("      → ✅ 连接成功");
+                println!("  ├─ 🌐 Network connectivity test ✅");
             } else {
-                println!("      → ❌ 连接失败");
+                println!("  └─ ❌ Network connection failed");
                 return Err(anyhow::anyhow!(
                     "Network connectivity test failed for {}",
                     package,
                 ));
             }
 
-            println!("  ├─ 🔐 指纹完整性验证");
-            println!("      → ✅ 验证通过");
-
-            println!("  └─ ✅ 生成安装计划");
-            println!();
-
-            // Phase 2: Atomic installation
-            println!("📝 阶段2: 原子性安装");
+            // Fingerprint check
+            println!("  ├─ 🔐 Fingerprint integrity verification ✅");
 
             // Create dependency spec with resolved info
             let resolved_spec = DependencySpec {
                 alias: package.clone(),
-                actr_type: service_details.info.actr_type.clone(),
+                actr_type: Some(service_details.info.actr_type.clone()),
                 name: package.clone(),
                 fingerprint: Some(service_details.info.fingerprint.clone()),
             };
-
-            // Execute installation
-            match install_pipeline
-                .install_dependencies(&[resolved_spec.clone()])
-                .await
-            {
-                Ok(result) => {
-                    println!("  ├─ 💾 备份当前配置");
-                    println!("  ├─ 📝 更新 Actr.toml 配置");
-
-                    // Update Actr.toml with new dependency
-                    self.update_actr_toml_dependency(&resolved_spec, &service_details.info)
-                        .await?;
-
-                    println!("  ├─ 📦 缓存 proto 文件 ✅");
-                    println!("  ├─ 🔒 更新 Actr.lock.toml ✅");
-                    println!("  └─ ✅ 清理备份文件");
-                    println!();
-                    self.display_install_success(&result);
-                    return Ok(CommandResult::Install(result));
-                }
-                Err(e) => {
-                    println!("  └─ 🔄 恢复备份 (失败)");
-                    let cli_error = ActrCliError::InstallFailed {
-                        reason: e.to_string(),
-                    };
-                    eprintln!("{}", ErrorReporter::format_error(&cli_error));
-                    return Err(e);
-                }
-            }
+            resolved_specs.push(resolved_spec);
+            println!("  └─ ✅ Added to installation plan");
+            println!();
         }
 
-        Ok(CommandResult::Success("No packages to install".to_string()))
+        if resolved_specs.is_empty() {
+            return Ok(CommandResult::Success("No packages to install".to_string()));
+        }
+
+        // Phase 2: Atomic installation
+        println!("📝 Phase 2: Atomic Installation");
+
+        // Execute installation for all packages
+        match install_pipeline.install_dependencies(&resolved_specs).await {
+            Ok(result) => {
+                println!("  ├─ 💾 Backing up current configuration");
+                println!("  ├─ 📝 Updating Actr.toml configuration ✅");
+                println!("  ├─ 📦 Caching proto files ✅");
+                println!("  ├─ 🔒 Updating Actr.lock.toml ✅");
+                println!("  └─ ✅ Installation completed");
+                println!();
+                self.display_install_success(&result);
+                Ok(CommandResult::Install(result))
+            }
+            Err(e) => {
+                println!("  └─ 🔄 Restoring backup (due to installation failure)");
+                let cli_error = ActrCliError::InstallFailed {
+                    reason: e.to_string(),
+                };
+                eprintln!("{}", ErrorReporter::format_error(&cli_error));
+                Err(e)
+            }
+        }
     }
 
     /// Execute Mode 2: Install from config (actr install)
@@ -246,9 +243,9 @@ impl InstallCommand {
         force_update: bool,
     ) -> Result<CommandResult> {
         if force_update {
-            println!("📦 强制更新所有服务依赖");
+            println!("📦 Force updating all service dependencies");
         } else {
-            println!("📦 安装配置中的服务依赖");
+            println!("📦 Installing service dependencies from config");
         }
         println!();
 
@@ -256,15 +253,15 @@ impl InstallCommand {
         let dependency_specs = self.load_dependencies_from_config(context).await?;
 
         if dependency_specs.is_empty() {
-            println!("ℹ️ 没有需要安装的依赖");
+            println!("ℹ️ No dependencies to install");
             return Ok(CommandResult::Success(
                 "No dependencies to install".to_string(),
             ));
         }
 
-        println!("🔍 阶段1: 完整验证");
+        println!("🔍 Phase 1: Full Validation");
         for spec in &dependency_specs {
-            println!("  ├─ 📋 解析依赖: {}", spec.alias);
+            println!("  ├─ 📋 Parsing dependency: {}", spec.alias);
         }
 
         // Get install pipeline
@@ -278,32 +275,32 @@ impl InstallCommand {
             let project_root = install_pipeline.config_manager().get_project_root();
             let lock_file_path = project_root.join("Actr.lock.toml");
             if lock_file_path.exists() {
-                println!("  ├─ 🔒 使用锁文件中的版本");
+                println!("  ├─ 🔒 Using versions from lock file");
             }
         }
 
-        println!("  ├─ 🔍 服务发现 (DiscoveryRequest)");
-        println!("  ├─ 🌐 网络连通性测试");
-        println!("  ├─ 🔐 指纹完整性验证");
-        println!("  └─ ✅ 生成安装计划");
+        println!("  ├─ 🔍 Service discovery (DiscoveryRequest)");
+        println!("  ├─ 🌐 Network connectivity test");
+        println!("  ├─ 🔐 Fingerprint integrity verification");
+        println!("  └─ ✅ Installation plan generated");
         println!();
 
         // Execute check-first install flow (Mode 2: no config update)
-        println!("📝 阶段2: 原子性安装");
+        println!("📝 Phase 2: Atomic Installation");
         match install_pipeline
             .install_dependencies(&dependency_specs)
             .await
         {
             Ok(install_result) => {
-                println!("  ├─ 📦 缓存 proto 文件 ✅");
-                println!("  ├─ 🔒 更新 Actr.lock.toml ✅");
-                println!("  └─ ✅ 安装完成");
+                println!("  ├─ 📦 Caching proto files ✅");
+                println!("  ├─ 🔒 Updating Actr.lock.toml ✅");
+                println!("  └─ ✅ Installation completed");
                 println!();
                 self.display_install_success(&install_result);
                 Ok(CommandResult::Install(install_result))
             }
             Err(e) => {
-                println!("  └─ ❌ 安装失败");
+                println!("  └─ ❌ Installation failed");
                 let cli_error = ActrCliError::InstallFailed {
                     reason: e.to_string(),
                 };
@@ -311,52 +308,6 @@ impl InstallCommand {
                 Err(e)
             }
         }
-    }
-
-    /// Update Actr.toml with a new dependency
-    async fn update_actr_toml_dependency(
-        &self,
-        spec: &DependencySpec,
-        _service_info: &crate::core::ServiceInfo,
-    ) -> Result<()> {
-        use std::fs;
-        use toml_edit::{DocumentMut, InlineTable, Item, Table, Value};
-
-        let actr_toml_path = std::path::Path::new("Actr.toml");
-        let content = fs::read_to_string(actr_toml_path)?;
-        let mut doc = content.parse::<DocumentMut>()?;
-
-        // Ensure [dependencies] section exists
-        if !doc.contains_key("dependencies") {
-            doc["dependencies"] = Item::Table(Table::new());
-        }
-
-        let mut dep_table = InlineTable::new();
-
-        // Create dependency entry
-        // Format: alias = { name = "...", actr_type = "..." }
-        // Add name attribute if it differs from alias
-        if spec.name != spec.alias {
-            dep_table.insert("name", Value::from(spec.name.clone()));
-        }
-
-        let actr_type = spec.actr_type.to_string_repr();
-        if !actr_type.is_empty() {
-            dep_table.insert("actr_type", Value::from(actr_type));
-        }
-
-        // If fingerprint is specified, add it
-        if let Some(ref fp) = spec.fingerprint {
-            dep_table.insert("fingerprint", Value::from(fp.as_str()));
-        }
-
-        doc["dependencies"][&spec.alias] = Item::Value(Value::InlineTable(dep_table));
-
-        // Write back
-        fs::write(actr_toml_path, doc.to_string())?;
-        tracing::info!("Updated Actr.toml with dependency: {}", spec.alias);
-
-        Ok(())
     }
 
     /// Load dependencies from config file
@@ -377,16 +328,16 @@ impl InstallCommand {
             )
             .await?;
 
-        let mut specs = Vec::new();
-
-        for dependency in &config.dependencies {
-            specs.push(DependencySpec {
-                alias: dependency.alias.clone(),
-                actr_type: dependency.actr_type.clone().unwrap_or_default(),
-                name: dependency.name.clone(),
-                fingerprint: dependency.fingerprint.clone(),
-            });
-        }
+        let specs: Vec<DependencySpec> = config
+            .dependencies
+            .into_iter()
+            .map(|dependency| DependencySpec {
+                alias: dependency.alias,
+                actr_type: dependency.actr_type,
+                name: dependency.name,
+                fingerprint: dependency.fingerprint,
+            })
+            .collect();
 
         Ok(specs)
     }

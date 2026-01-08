@@ -58,9 +58,6 @@ pub enum ActrCliError {
     #[error("Actor framework error: {0}")]
     Actor(#[from] actr_protocol::ActrError),
 
-    #[error("URI parsing error: {0}")]
-    UriParsing(#[from] actr_protocol::uri::ActrUriError),
-
     #[error("Configuration parsing error: {0}")]
     ConfigParsing(#[from] actr_config::ConfigError),
 

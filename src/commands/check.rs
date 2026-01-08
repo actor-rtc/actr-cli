@@ -1,27 +1,31 @@
-//! Check command implementation - verify Actor-RTC service connectivity
+//! Check command implementation - verify Actor-RTC service availability
 //!
-//! The check command validates that Actor-RTC services are reachable and available
-//! in the current network environment using the actr:// service protocol.
+//! The check command validates that services are available in the registry
+//! and optionally verifies they match the configured dependencies.
 
-use crate::commands::Command;
-use crate::error::{ActrCliError, Result};
-use actr_config::ConfigParser;
+use crate::core::{
+    ActrCliError, AvailabilityStatus, Command, CommandContext, CommandResult, ComponentType,
+    ServiceDiscovery,
+};
+use anyhow::Result;
 use async_trait::async_trait;
 use clap::Args;
+use std::sync::Arc;
 use tracing::{debug, error, info};
 
-#[derive(Args)]
+/// Check command - validates service availability
+#[derive(Args, Debug)]
 #[command(
     about = "Validate project dependencies",
-    long_about = "Validate that Actor-RTC services are reachable and available in the current network environment"
+    long_about = "Validate that services are available in the registry and match the configured dependencies"
 )]
 pub struct CheckCommand {
-    /// Actor-RTC service URIs to check (e.g., actr://user-service/, actr://order-service/)
-    /// If not provided, checks all actr:// service URIs from the configuration file
-    #[arg(value_name = "ACTR_URI")]
-    pub uris: Vec<String>,
+    /// Service names to check (e.g., "user-service", "order-service")
+    /// If not provided, checks all services from the configuration file
+    #[arg(value_name = "SERVICE_NAME")]
+    pub packages: Vec<String>,
 
-    /// Configuration file to load service URIs from (defaults to Actr.toml)
+    /// Configuration file to load services from (defaults to Actr.toml)
     #[arg(short = 'f', long = "file")]
     pub config_file: Option<String>,
 
@@ -32,210 +36,178 @@ pub struct CheckCommand {
     /// Timeout for each service check in seconds
     #[arg(long, default_value = "10")]
     pub timeout: u64,
+
+    /// Also verify services are installed in Actr.lock.toml
+    #[arg(long)]
+    pub lock: bool,
 }
 
 #[async_trait]
 impl Command for CheckCommand {
-    async fn execute(&self) -> Result<()> {
+    async fn execute(&self, context: &CommandContext) -> Result<CommandResult> {
         let config_path = self.config_file.as_deref().unwrap_or("Actr.toml");
 
-        // Determine which service URIs to check
-        let uris_to_check = if self.uris.is_empty() {
-            // Load service URIs from configuration file
-            info!(
-                "🔍 Loading Actor-RTC service URIs from configuration: {}",
-                config_path
-            );
-            self.load_uris_from_config(config_path).await?
-        } else {
-            // Use provided service URIs
-            info!("🔍 Checking provided Actor-RTC service URIs");
-            self.validate_provided_uris()?
+        // Get ServiceDiscovery component
+        let service_discovery = {
+            let container = context.container.lock().unwrap();
+            container.get_service_discovery()?
         };
 
-        if uris_to_check.is_empty() {
-            info!("ℹ️ No Actor-RTC service URIs to check");
-            return Ok(());
+        // Determine which service packages to check
+        let packages_to_check = if self.packages.is_empty() {
+            // Load service names from configuration file
+            info!("🔍 Loading services from configuration: {}", config_path);
+            self.load_packages_from_config(config_path)?
+        } else {
+            // Use provided service names
+            info!("🔍 Checking provided services");
+            self.packages.clone()
+        };
+
+        if packages_to_check.is_empty() {
+            info!("ℹ️ No services to check");
+            return Ok(CommandResult::Success("No services to check".to_string()));
         }
 
-        info!(
-            "📦 Checking {} Actor-RTC service URIs...",
-            uris_to_check.len()
-        );
+        info!("📦 Checking {} services...", packages_to_check.len());
 
         let mut total_checked = 0;
         let mut available_count = 0;
         let mut unavailable_count = 0;
+        let mut results: Vec<(String, ServiceCheckResult)> = Vec::new();
 
-        for uri in &uris_to_check {
+        for package in &packages_to_check {
             total_checked += 1;
-            let is_available = self.check_actr_uri(uri).await?;
+            let check_result = self
+                .check_service(package.as_str(), &service_discovery)
+                .await;
 
-            if is_available {
-                available_count += 1;
-            } else {
-                unavailable_count += 1;
+            match check_result {
+                Ok(status) => {
+                    let is_available = status.is_available;
+                    results.push((package.clone(), ServiceCheckResult::Available(status)));
+
+                    if is_available {
+                        available_count += 1;
+                    } else {
+                        unavailable_count += 1;
+                    }
+                }
+                Err(e) => {
+                    results.push((package.clone(), ServiceCheckResult::Error(e.to_string())));
+                    unavailable_count += 1;
+                }
             }
         }
 
         // Summary
         info!("");
-        info!("📊 Actor-RTC Service Check Summary:");
+        info!("📊 Service Check Summary:");
         info!("   Total checked: {}", total_checked);
         info!("   ✅ Available: {}", available_count);
         info!("   ❌ Unavailable: {}", unavailable_count);
 
-        if unavailable_count > 0 {
-            error!(
-                "⚠️ {} Actor-RTC services are not available in the current network",
-                unavailable_count
-            );
-            return Err(ActrCliError::dependency_error(
-                "Some Actor-RTC services are unavailable",
-            ));
-        } else {
-            info!("🎉 All Actor-RTC services are available and accessible!");
+        // Detailed output if verbose
+        if self.verbose {
+            info!("");
+            info!("📋 Detailed Results:");
+            for (name, result) in &results {
+                match result {
+                    ServiceCheckResult::Available(status) => {
+                        if status.is_available {
+                            info!("   ✅ [{}] Available", name);
+                        } else {
+                            info!("   ❌ [{}] Not found in registry", name);
+                        }
+                    }
+                    ServiceCheckResult::Error(error_msg) => {
+                        info!("   ❌ [{}] Error: {}", name, error_msg);
+                    }
+                }
+            }
         }
 
-        Ok(())
+        if unavailable_count > 0 {
+            error!("⚠️ {} services are not available", unavailable_count);
+            return Err(ActrCliError::Dependency {
+                message: format!("{} services are unavailable", unavailable_count),
+            }
+            .into());
+        } else {
+            info!("🎉 All services are available and accessible!");
+        }
+
+        Ok(CommandResult::Success(format!(
+            "Checked {} services, all available",
+            total_checked
+        )))
+    }
+
+    fn required_components(&self) -> Vec<ComponentType> {
+        vec![ComponentType::ServiceDiscovery]
+    }
+
+    fn name(&self) -> &str {
+        "check"
+    }
+
+    fn description(&self) -> &str {
+        "Validate that services are available in the registry"
     }
 }
 
 impl CheckCommand {
-    /// Load actr:// service URIs from configuration file
-    async fn load_uris_from_config(&self, config_path: &str) -> Result<Vec<String>> {
+    /// Load service names from configuration file
+    fn load_packages_from_config(&self, config_path: &str) -> Result<Vec<String>> {
+        use actr_config::ConfigParser;
+
         // Load configuration
-        let config = ConfigParser::from_file(config_path)
-            .map_err(|e| ActrCliError::config_error(format!("Failed to load config: {e}")))?;
+        let config = ConfigParser::from_file(config_path).map_err(|e| ActrCliError::Config {
+            message: format!("Failed to load config: {e}"),
+        })?;
 
-        let mut uris = Vec::new();
+        let mut packages = Vec::new();
 
-        // Extract actr:// service URIs from dependencies
-        // Construct URI from ActrType: actr://<realm>:<manufacturer>+<name>@<version>/
+        // Extract service names from dependencies
         for dependency in &config.dependencies {
-            if let Some(actr_type) = &dependency.actr_type {
-                let uri = format!(
-                    "actr://{}:{}+{}@v1/",
-                    dependency.realm.realm_id, actr_type.manufacturer, actr_type.name
-                );
-                uris.push(uri);
-                debug!(
-                    "Added dependency URI: {} (alias: {})",
-                    uris.last().unwrap(),
-                    dependency.alias
-                );
-            }
+            packages.push(dependency.name.clone());
+            debug!(
+                "Added service: {} (alias: {})",
+                dependency.name, dependency.alias
+            );
         }
 
-        if uris.is_empty() {
+        if packages.is_empty() {
             info!(
                 "ℹ️ No dependencies found in configuration file: {}",
                 config_path
             );
         } else {
-            info!(
-                "📋 Found {} actr:// service URIs in configuration",
-                uris.len()
-            );
+            info!("📋 Found {} services in configuration", packages.len());
         }
 
-        Ok(uris)
+        Ok(packages)
     }
 
-    /// Validate provided service URIs and filter for actr:// protocol only
-    fn validate_provided_uris(&self) -> Result<Vec<String>> {
-        let mut valid_uris = Vec::new();
+    /// Check service availability using ServiceDiscovery
+    async fn check_service(
+        &self,
+        service_name: &str,
+        service_discovery: &Arc<dyn ServiceDiscovery>,
+    ) -> Result<AvailabilityStatus> {
+        debug!("Checking service availability: {}", service_name);
 
-        for uri in &self.uris {
-            if uri.starts_with("actr://") {
-                valid_uris.push(uri.clone());
-            } else {
-                error!(
-                    "❌ Invalid service URI protocol: {} (only actr:// service URIs are supported)",
-                    uri
-                );
-                return Err(ActrCliError::dependency_error(format!(
-                    "Invalid service URI protocol: {uri} (only actr:// service URIs are supported)"
-                )));
-            }
-        }
+        // Use ServiceDiscovery to check availability
+        let status = service_discovery
+            .check_service_availability(service_name)
+            .await?;
 
-        Ok(valid_uris)
-    }
-
-    /// Check availability of a specific actr:// service URI
-    async fn check_actr_uri(&self, uri: &str) -> Result<bool> {
-        info!("🔗 Checking Actor-RTC service: {}", uri);
-
-        // Parse the actr:// service URI
-        let service_uri = match self.parse_actr_uri(uri) {
-            Ok(parsed) => parsed,
-            Err(e) => {
-                error!("❌ [{}] Invalid Actor-RTC service URI format: {}", uri, e);
-                return Ok(false);
-            }
-        };
-
-        match service_uri {
-            ActrUri::Service { service_name } => {
-                self.check_service_availability(&service_name).await
-            }
-        }
-    }
-
-    /// Parse actr:// service URI into components
-    fn parse_actr_uri(&self, uri: &str) -> Result<ActrUri> {
-        if !uri.starts_with("actr://") {
-            return Err(ActrCliError::dependency_error(
-                "Service URI must start with actr://",
-            ));
-        }
-
-        let uri_part = &uri[7..]; // Remove "actr://"
-
-        // Service URI must end with / (service-level dependency)
-        if uri_part.ends_with('/') {
-            let service_name = uri_part.trim_end_matches('/').to_string();
-            if service_name.is_empty() {
-                return Err(ActrCliError::dependency_error(
-                    "Service name cannot be empty",
-                ));
-            }
-            return Ok(ActrUri::Service { service_name });
-        }
-
-        Err(ActrCliError::dependency_error(
-            "Invalid actr:// service URI format. Use 'actr://service-name/'",
-        ))
-    }
-
-    /// Check service-level availability (actr://service-name/)
-    async fn check_service_availability(&self, service_name: &str) -> Result<bool> {
-        debug!("Checking service availability: actr://{}/", service_name);
-
-        // TODO: Implement actual service discovery and connectivity check
-        // For now, just validate the URI format and return success
-        if service_name.is_empty() {
-            error!("❌ [actr://{}] Invalid empty service name", service_name);
-            return Ok(false);
-        }
-
-        if self.verbose {
-            info!(
-                "✅ [actr://{}] URI format is valid (service discovery not yet implemented)",
-                service_name
-            );
-        } else {
-            info!("✅ [actr://{}] URI format valid", service_name);
-        }
-
-        Ok(true)
+        Ok(status)
     }
 }
 
-/// Parsed Actor-RTC service URI components
-#[derive(Debug, Clone)]
-enum ActrUri {
-    /// Service-level URI: actr://service-name/
-    Service { service_name: String },
+/// Result of a service check
+enum ServiceCheckResult {
+    Available(AvailabilityStatus),
+    Error(String),
 }

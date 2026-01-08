@@ -35,7 +35,7 @@ use std::path::{Path, PathBuf};
 pub struct DependencySpec {
     pub alias: String,
     pub name: String,
-    pub actr_type: ActrType,
+    pub actr_type: Option<ActrType>,
     pub fingerprint: Option<String>,
 }
 
@@ -76,9 +76,9 @@ pub struct MethodDefinition {
 pub struct ServiceInfo {
     /// Service name (package name)
     pub name: String,
-    pub actr_type: ActrType,
     pub tags: Vec<String>,
     pub fingerprint: String,
+    pub actr_type: ActrType,
     pub published_at: Option<i64>,
     pub description: Option<String>,
     pub methods: Vec<MethodDefinition>,

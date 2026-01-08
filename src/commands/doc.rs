@@ -398,7 +398,8 @@ api_service = "https://example.com/api/service.proto"
 
 # Actor 注册表
 [dependencies.payment]
-uri = "actr://101:acme+payment-service@v1/payment.proto"
+name = "payment-service"
+actr_type = "payment"
 fingerprint = "sha256:a1b2c3d4..."</code></pre>
         </div>
     </div>

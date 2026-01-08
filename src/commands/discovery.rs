@@ -84,7 +84,7 @@ impl Command for DiscoveryCommand {
 
         match action_choice {
             0 => {
-                self.display_service_info(&selected_service);
+                self.display_service_info(selected_service);
                 Ok(CommandResult::Success(
                     "Service details displayed".to_string(),
                 ))
@@ -383,7 +383,7 @@ impl DiscoveryCommand {
         // Convert to dependency spec
         let dependency_spec = DependencySpec {
             alias: service.name.clone(),
-            actr_type: service.actr_type.clone(),
+            actr_type: Some(service.actr_type.clone()),
             name: service.name.clone(),
             fingerprint: Some(service.fingerprint.clone()),
         };

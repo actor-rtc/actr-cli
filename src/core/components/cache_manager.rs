@@ -48,7 +48,7 @@ impl Default for DefaultCacheManager {
 #[async_trait]
 impl CacheManager for DefaultCacheManager {
     async fn get_cached_proto(&self, service_name: &str) -> Result<Option<CachedProto>> {
-        let cache_path = self.get_service_proto_dir(&service_name);
+        let cache_path = self.get_service_proto_dir(service_name);
 
         if !cache_path.exists() {
             return Ok(None);

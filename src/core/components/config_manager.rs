@@ -87,10 +87,18 @@ impl ConfigManager for TomlConfigManager {
         }
 
         // Add actr_type attribute
-        let actr_type_repr = spec.actr_type.to_string_repr();
-        if !actr_type_repr.is_empty() {
-            dep_table.insert("actr_type", Value::from(actr_type_repr));
+        let actr_type_repr = spec
+            .actr_type
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("Actr type is required for dependency: {}", spec.alias))?
+            .to_string_repr();
+        if actr_type_repr.is_empty() {
+            return Err(anyhow::anyhow!(
+                "Actr type is required for dependency: {}",
+                spec.alias
+            ));
         }
+        dep_table.insert("actr_type", Value::from(actr_type_repr));
 
         if let Some(fingerprint) = &spec.fingerprint {
             dep_table.insert("fingerprint", Value::from(fingerprint.as_str()));
@@ -126,13 +134,13 @@ impl ConfigManager for TomlConfigManager {
             if dependency.alias.trim().is_empty() {
                 errors.push("dependency alias is required".to_string());
             }
-            if let Some(actr_type) = &dependency.actr_type {
-                if actr_type.name.trim().is_empty() {
-                    errors.push(format!(
-                        "dependency {} has an empty actr_type name",
-                        dependency.alias
-                    ));
-                }
+            if let Some(actr_type) = &dependency.actr_type
+                && actr_type.name.trim().is_empty()
+            {
+                errors.push(format!(
+                    "dependency {} has an empty actr_type name",
+                    dependency.alias
+                ));
             }
         }
 
