@@ -13,17 +13,32 @@ pub enum ActrCliError {
     #[error("Invalid project: {message}")]
     InvalidProject { message: String },
 
+    #[error("Invalid argument: {message}")]
+    InvalidArgument { message: String },
+
     #[error("Network error: {message}")]
     Network { message: String },
 
     #[error("Dependency error: {message}")]
     Dependency { message: String },
 
+    #[error("Dependency conflict: {message}")]
+    DependencyConflict { message: String },
+
+    #[error("Service not found: {name}")]
+    ServiceNotFound { name: String },
+
     #[error("Service discovery error: {message}")]
     ServiceDiscovery { message: String },
 
     #[error("Fingerprint validation error: {message}")]
     FingerprintValidation { message: String },
+
+    #[error("Fingerprint mismatch: expected {expected}, got {actual}")]
+    FingerprintMismatch { expected: String, actual: String },
+
+    #[error("Compatibility conflict: {message}")]
+    CompatibilityConflict { message: String },
 
     #[error("Code generation error: {message}")]
     CodeGeneration { message: String },
