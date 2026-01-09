@@ -9,6 +9,7 @@ use crate::commands::Command;
 use crate::commands::SupportedLanguage;
 use crate::commands::codegen::{GenContext, execute_codegen};
 use crate::error::{ActrCliError, Result};
+use crate::utils::to_pascal_case;
 // 只导入必要的类型，避免拉入不需要的依赖如 sqlite
 // use actr_framework::prelude::*;
 use async_trait::async_trait;
@@ -20,16 +21,20 @@ use tracing::{debug, info, warn};
 #[derive(Args, Debug, Clone)]
 #[command(
     about = "Generate code from proto files",
-    long_about = "Generate Actor code in multiple languages from proto files, including protobuf message types, Actor infrastructure code, and user business logic scaffolds"
+    after_help = "Default output paths by language:
+  - rust:   src/generated
+  - swift:  {PascalName}/Generated (e.g., EchoApp/Generated)
+  - kotlin: app/src/main/java/{package}/generated
+  - python: generated"
 )]
 pub struct GenCommand {
     /// Input proto file or directory
-    #[arg(short, long, default_value = "proto")]
+    #[arg(short, long, default_value = "protos")]
     pub input: PathBuf,
 
-    /// Output directory
-    #[arg(short, long, default_value = "src/generated")]
-    pub output: PathBuf,
+    /// Output directory for generated code (use -o to override language defaults)
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
 
     /// Path to Actr.toml config file
     #[arg(short, long, default_value = "Actr.toml")]
@@ -63,6 +68,9 @@ pub struct GenCommand {
 #[async_trait]
 impl Command for GenCommand {
     async fn execute(&self) -> Result<()> {
+        // Determine output path based on language
+        let output = self.determine_output_path()?;
+
         info!(
             "🚀 Start code generation (language: {:?})...",
             self.language
@@ -75,7 +83,7 @@ impl Command for GenCommand {
             let context = GenContext {
                 proto_files,
                 input_path: self.input.clone(),
-                output: self.output.clone(),
+                output,
                 config: config.clone(),
                 no_scaffold: self.no_scaffold,
                 overwrite_user_code: self.overwrite_user_code,
@@ -113,6 +121,48 @@ impl Command for GenCommand {
 }
 
 impl GenCommand {
+    /// Determine output path based on language if not explicitly specified
+    fn determine_output_path(&self) -> Result<PathBuf> {
+        // If user specified a custom output, use it
+        if let Some(ref output) = self.output {
+            return Ok(output.clone());
+        }
+
+        // Determine language-specific default output path
+        match self.language {
+            SupportedLanguage::Swift => {
+                // Read package name from config for Swift
+                let config = actr_config::ConfigParser::from_file(&self.config).map_err(|e| {
+                    ActrCliError::config_error(format!("Failed to parse Actr.toml: {e}"))
+                })?;
+                let project_name = &config.package.name;
+                // Convert to PascalCase for Swift module name
+                let pascal_name = to_pascal_case(project_name);
+                Ok(PathBuf::from(format!("{}/Generated", pascal_name)))
+            }
+            SupportedLanguage::Kotlin => {
+                // Kotlin default: app/src/main/java/{package_path}/generated
+                let config = actr_config::ConfigParser::from_file(&self.config).map_err(|e| {
+                    ActrCliError::config_error(format!("Failed to parse Actr.toml: {e}"))
+                })?;
+                let package_name = config.package.name.replace("-", ".");
+                let package_path = package_name.replace(".", "/");
+                Ok(PathBuf::from(format!(
+                    "app/src/main/java/{}/generated",
+                    package_path
+                )))
+            }
+            SupportedLanguage::Python => {
+                // Python default: generated
+                Ok(PathBuf::from("generated"))
+            }
+            SupportedLanguage::Rust => {
+                // Rust default: src/generated
+                Ok(PathBuf::from("src/generated"))
+            }
+        }
+    }
+
     fn preprocess(&self) -> Result<Vec<PathBuf>> {
         // Step 1: Validate inputs
         self.validate_inputs()?;
@@ -148,14 +198,15 @@ impl GenCommand {
             return Ok(());
         }
 
-        if !self.output.exists() {
+        let output = self.determine_output_path()?;
+        if !output.exists() {
             return Ok(());
         }
 
-        info!("🧹 Cleaning old generation results: {:?}", self.output);
+        info!("🧹 Cleaning old generation results: {:?}", output);
 
-        self.make_writable_recursive(&self.output)?;
-        fs::remove_dir_all(&self.output).map_err(|e| {
+        self.make_writable_recursive(&output)?;
+        fs::remove_dir_all(&output).map_err(|e| {
             ActrCliError::config_error(format!("Failed to delete generation directory: {e}"))
         })?;
 
@@ -218,12 +269,13 @@ impl GenCommand {
 
     /// 准备输出目录
     fn prepare_output_dirs(&self) -> Result<()> {
-        std::fs::create_dir_all(&self.output).map_err(|e| {
+        let output = self.determine_output_path()?;
+        std::fs::create_dir_all(&output).map_err(|e| {
             ActrCliError::config_error(format!("Failed to create output directory: {e}"))
         })?;
 
         if self.should_generate_scaffold() {
-            let user_code_dir = self.output.join("../");
+            let user_code_dir = output.join("../");
             std::fs::create_dir_all(&user_code_dir).map_err(|e| {
                 ActrCliError::config_error(format!("Failed to create user code directory: {e}"))
             })?;
@@ -232,24 +284,14 @@ impl GenCommand {
         Ok(())
     }
 
-    /// 发现 proto 文件
+    /// Find proto files recursively
     fn discover_proto_files(&self) -> Result<Vec<PathBuf>> {
         let mut proto_files = Vec::new();
 
         if self.input.is_file() {
             proto_files.push(self.input.clone());
         } else {
-            // 遍历目录查找 .proto 文件
-            for entry in std::fs::read_dir(&self.input).map_err(|e| {
-                ActrCliError::config_error(format!("Failed to read input directory: {e}"))
-            })? {
-                let entry = entry.map_err(|e| ActrCliError::config_error(e.to_string()))?;
-                let path = entry.path();
-
-                if path.extension().unwrap_or_default() == "proto" {
-                    proto_files.push(path);
-                }
-            }
+            self.collect_proto_files(&self.input, &mut proto_files)?;
         }
 
         if proto_files.is_empty() {
@@ -257,6 +299,23 @@ impl GenCommand {
         }
 
         Ok(proto_files)
+    }
+
+    /// Collect proto files recursively
+    fn collect_proto_files(&self, dir: &PathBuf, proto_files: &mut Vec<PathBuf>) -> Result<()> {
+        for entry in std::fs::read_dir(dir)
+            .map_err(|e| ActrCliError::config_error(format!("Failed to read directory: {e}")))?
+        {
+            let entry = entry.map_err(|e| ActrCliError::config_error(e.to_string()))?;
+            let path = entry.path();
+
+            if path.is_file() && path.extension().unwrap_or_default() == "proto" {
+                proto_files.push(path);
+            } else if path.is_dir() {
+                self.collect_proto_files(&path, proto_files)?;
+            }
+        }
+        Ok(())
     }
 
     /// 确保 protoc-gen-actrframework 插件可用
@@ -432,6 +491,9 @@ impl GenCommand {
         let manufacturer = config.package.actr_type.manufacturer.clone();
         debug!("Using manufacturer from Actr.toml: {}", manufacturer);
 
+        // 确定输出路径
+        let output = self.determine_output_path()?;
+
         for proto_file in proto_files {
             debug!("Processing proto file: {:?}", proto_file);
 
@@ -439,16 +501,16 @@ impl GenCommand {
             let mut cmd = StdCommand::new("protoc");
             cmd.arg(format!("--proto_path={}", self.input.display()))
                 .arg("--prost_opt=flat_output_dir")
-                .arg(format!("--prost_out={}", self.output.display()))
+                .arg(format!("--prost_out={}", output.display()))
                 .arg(proto_file);
 
             debug!("Executing protoc (prost): {:?}", cmd);
-            let output = cmd.output().map_err(|e| {
+            let output_cmd = cmd.output().map_err(|e| {
                 ActrCliError::command_error(format!("Failed to execute protoc (prost): {e}"))
             })?;
 
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
+            if !output_cmd.status.success() {
+                let stderr = String::from_utf8_lossy(&output_cmd.stderr);
                 return Err(ActrCliError::command_error(format!(
                     "protoc (prost) execution failed: {stderr}"
                 )));
@@ -462,24 +524,24 @@ impl GenCommand {
                     plugin_path.display()
                 ))
                 .arg(format!("--actrframework_opt=manufacturer={manufacturer}"))
-                .arg(format!("--actrframework_out={}", self.output.display()))
+                .arg(format!("--actrframework_out={}", output.display()))
                 .arg(proto_file);
 
             debug!("Executing protoc (actrframework): {:?}", cmd);
-            let output = cmd.output().map_err(|e| {
+            let output_cmd = cmd.output().map_err(|e| {
                 ActrCliError::command_error(format!(
                     "Failed to execute protoc (actrframework): {e}"
                 ))
             })?;
 
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
+            if !output_cmd.status.success() {
+                let stderr = String::from_utf8_lossy(&output_cmd.stderr);
                 return Err(ActrCliError::command_error(format!(
                     "protoc (actrframework) execution failed: {stderr}"
                 )));
             }
 
-            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stdout = String::from_utf8_lossy(&output_cmd.stdout);
             if !stdout.is_empty() {
                 debug!("protoc output: {}", stdout);
             }
@@ -494,14 +556,15 @@ impl GenCommand {
 
     /// 生成 mod.rs 文件
     async fn generate_mod_rs(&self, _proto_files: &[PathBuf]) -> Result<()> {
-        let mod_path = self.output.join("mod.rs");
+        let output = self.determine_output_path()?;
+        let mod_path = output.join("mod.rs");
 
         // 扫描实际生成的文件，而不是根据 proto 文件名猜测
         let mut proto_modules = Vec::new();
         let mut service_modules = Vec::new();
 
         use std::fs;
-        for entry in fs::read_dir(&self.output).map_err(|e| {
+        for entry in fs::read_dir(&output).map_err(|e| {
             ActrCliError::config_error(format!("Failed to read output directory: {e}"))
         })? {
             let entry = entry.map_err(|e| ActrCliError::config_error(e.to_string()))?;
@@ -561,7 +624,8 @@ impl GenCommand {
     fn set_generated_files_readonly(&self) -> Result<()> {
         use std::fs;
 
-        for entry in fs::read_dir(&self.output).map_err(|e| {
+        let output = self.determine_output_path()?;
+        for entry in fs::read_dir(&output).map_err(|e| {
             ActrCliError::config_error(format!("Failed to read output directory: {e}"))
         })? {
             let entry = entry.map_err(|e| ActrCliError::config_error(e.to_string()))?;
@@ -617,8 +681,8 @@ impl GenCommand {
 
     /// Generate scaffold for a specific service
     async fn generate_service_scaffold(&self, service_name: &str) -> Result<()> {
-        let user_file_path = self
-            .output
+        let output = self.determine_output_path()?;
+        let user_file_path = output
             .parent()
             .unwrap_or_else(|| Path::new("src"))
             .join(format!("{}_service.rs", service_name.to_lowercase()));
@@ -782,7 +846,8 @@ mod tests {{
             .arg("max_width=100");
 
         // 格式化生成目录中的所有 .rs 文件
-        for entry in std::fs::read_dir(&self.output).map_err(|e| {
+        let output = self.determine_output_path()?;
+        for entry in std::fs::read_dir(&output).map_err(|e| {
             ActrCliError::config_error(format!("Failed to read output directory: {e}"))
         })? {
             let entry = entry.map_err(|e| ActrCliError::config_error(e.to_string()))?;
@@ -858,7 +923,10 @@ mod tests {{
     fn print_next_steps(&self) {
         println!("\n🎉 Code generation completed!");
         println!("\n📋 Next steps:");
-        println!("1. 📖 View generated code: {:?}", self.output);
+        let output = self
+            .determine_output_path()
+            .unwrap_or_else(|_| PathBuf::from("src/generated"));
+        println!("1. 📖 View generated code: {:?}", output);
         if self.should_generate_scaffold() {
             println!(
                 "2. ✏️  Implement business logic: in the *_service.rs files in the src/ directory"

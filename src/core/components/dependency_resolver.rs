@@ -1,9 +1,10 @@
+use actr_config::Config;
 use anyhow::Result;
 use async_trait::async_trait;
 
 use super::{
     ConflictReport, ConflictType, DependencyGraph, DependencyResolver, DependencySpec,
-    ResolvedDependency,
+    ResolvedDependency, ServiceDetails,
 };
 
 pub struct DefaultDependencyResolver;
@@ -22,21 +23,46 @@ impl Default for DefaultDependencyResolver {
 
 #[async_trait]
 impl DependencyResolver for DefaultDependencyResolver {
-    async fn resolve_spec(&self, _spec: &str) -> Result<DependencySpec> {
-        todo!()
+    async fn resolve_spec(&self, config: &Config) -> Result<Vec<DependencySpec>> {
+        let specs: Vec<DependencySpec> = config
+            .dependencies
+            .iter()
+            .map(|dependency| DependencySpec {
+                alias: dependency.alias.clone(),
+                name: dependency.name.clone(),
+                actr_type: dependency.actr_type.clone(),
+                fingerprint: dependency.fingerprint.clone(),
+            })
+            .collect();
+
+        Ok(specs)
     }
 
     async fn resolve_dependencies(
         &self,
         specs: &[DependencySpec],
+        service_details: &[ServiceDetails],
     ) -> Result<Vec<ResolvedDependency>> {
         let mut resolved = Vec::with_capacity(specs.len());
 
         for spec in specs {
+            // Find matching service details
+            let matching_details = service_details
+                .iter()
+                .find(|details| &details.info.name == &spec.name);
+
+            let (fingerprint, proto_files) = match matching_details {
+                Some(details) => (
+                    details.info.fingerprint.clone(),
+                    details.proto_files.clone(),
+                ),
+                None => (spec.fingerprint.clone().unwrap_or_default(), Vec::new()),
+            };
+
             resolved.push(ResolvedDependency {
                 spec: spec.clone(),
-                fingerprint: spec.fingerprint.clone().unwrap_or_default(),
-                proto_files: Vec::new(),
+                fingerprint,
+                proto_files,
             });
         }
 
@@ -48,7 +74,7 @@ impl DependencyResolver for DefaultDependencyResolver {
 
         for i in 0..deps.len() {
             for j in (i + 1)..deps.len() {
-                // Conflict if same alias is used (should not happen if from same Actr.toml, but could from merged configs)
+                // Conflict if same alias is used
                 if deps[i].spec.alias == deps[j].spec.alias {
                     // Same alias is always a conflict if they point to different things
                     if deps[i].spec.name != deps[j].spec.name
@@ -93,12 +119,7 @@ impl DependencyResolver for DefaultDependencyResolver {
     }
 
     async fn build_dependency_graph(&self, deps: &[ResolvedDependency]) -> Result<DependencyGraph> {
-        let mut nodes = Vec::new();
-        for dep in deps {
-            if !nodes.contains(&dep.spec.alias) {
-                nodes.push(dep.spec.alias.clone());
-            }
-        }
+        let nodes: Vec<String> = deps.iter().map(|d| d.spec.alias.clone()).collect();
 
         Ok(DependencyGraph {
             nodes,

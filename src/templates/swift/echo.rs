@@ -3,7 +3,7 @@ use crate::templates::ProjectTemplate;
 use std::collections::HashMap;
 use std::path::Path;
 
-pub fn load(files: &mut HashMap<String, String>) -> Result<()> {
+pub fn load(files: &mut HashMap<String, String>, service_name: &str) -> Result<()> {
     let fixtures_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures");
 
     // Load template files from disk with placeholders in path
@@ -48,10 +48,12 @@ pub fn load(files: &mut HashMap<String, String>) -> Result<()> {
         "{{PROJECT_NAME_PASCAL}}/ActrService+Echo.swift",
     )?;
     // Load fixture files (no placeholders, fixed paths)
+    // Use handlebars to render the service_name in the path
+    let proto_path = format!("protos/remote/{}/echo.proto", service_name);
     ProjectTemplate::load_file(
         &fixtures_root.join("echo-service/echo.proto"),
         files,
-        "protos/echo.proto",
+        &proto_path,
     )?;
     files.insert(
         "protos/client.proto".to_string(),

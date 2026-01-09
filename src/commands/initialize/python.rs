@@ -12,7 +12,9 @@ pub struct PythonInitializer;
 impl ProjectInitializer for PythonInitializer {
     fn generate_project_structure(&self, context: &InitContext) -> Result<()> {
         let template = ProjectTemplate::new(context.template, SupportedLanguage::Python);
-        let template_context = TemplateContext::new(&context.project_name, &context.signaling_url);
+        let service_name = context.template.to_service_name();
+        let template_context =
+            TemplateContext::new(&context.project_name, &context.signaling_url, service_name);
         template.generate(&context.project_dir, &template_context)?;
 
         run_actr_gen(&context.project_dir)?;

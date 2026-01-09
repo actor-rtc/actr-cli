@@ -1,6 +1,6 @@
 //! Default CacheManager implementation
 //!
-//! Proto files are cached to the project's `proto/remote/` folder (not ~/.actr/cache)
+//! Proto files are cached to the project's `protos/remote/` folder (not ~/.actr/cache)
 //! following the documentation spec for dependency management.
 
 use anyhow::Result;
@@ -11,7 +11,7 @@ use super::{CacheManager, CacheStats, CachedProto, Fingerprint, ProtoFile};
 
 /// Default cache manager (file-based, project-local)
 ///
-/// Caches proto files to `{project_root}/proto/remote/{service_name}/` directory
+/// Caches proto files to `{project_root}/protos/remote/{service_name}/` directory
 /// following the documentation spec.
 pub struct DefaultCacheManager {
     /// Project root directory (where Actr.toml is located)
@@ -30,10 +30,10 @@ impl DefaultCacheManager {
     }
 
     /// Get the proto cache directory for a service
-    /// Returns: {project_root}/proto/remote/{service_name}/
+    /// Returns: {project_root}/protos/remote/{service_name}/
     fn get_service_proto_dir(&self, service_name: &str) -> PathBuf {
         self.project_root
-            .join("proto")
+            .join("protos")
             .join("remote")
             .join(service_name)
     }
@@ -105,7 +105,7 @@ impl CacheManager for DefaultCacheManager {
         }
 
         tracing::info!(
-            "Cached {} proto files to proto/remote/{}/",
+            "Cached {} proto files to protos/remote/{}/",
             files.len(),
             service_name
         );
@@ -121,7 +121,7 @@ impl CacheManager for DefaultCacheManager {
     }
 
     async fn clear_cache(&self) -> Result<()> {
-        let proto_dir = self.project_root.join("proto");
+        let proto_dir = self.project_root.join("protos");
         if proto_dir.exists() {
             std::fs::remove_dir_all(&proto_dir)?;
         }
@@ -129,7 +129,7 @@ impl CacheManager for DefaultCacheManager {
     }
 
     async fn get_cache_stats(&self) -> Result<CacheStats> {
-        let proto_dir = self.project_root.join("proto");
+        let proto_dir = self.project_root.join("protos");
         let mut total_size = 0u64;
         let mut entry_count = 0usize;
 

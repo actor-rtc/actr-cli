@@ -150,7 +150,7 @@ actr gen
 actr gen -i proto -o src/generated
 
 # Swift
-actr gen -l swift -i protos/echo.proto -o MyApp/Generated
+actr gen -l swift -i protos/remote/echo-service/echo.proto -o MyApp/Generated
 ```
 
 说明：

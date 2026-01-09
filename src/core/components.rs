@@ -221,13 +221,14 @@ pub struct ConfigBackup {
 /// 依赖解析和冲突检测
 #[async_trait]
 pub trait DependencyResolver: Send + Sync {
-    /// 解析依赖规范字符串
-    async fn resolve_spec(&self, spec: &str) -> Result<DependencySpec>;
+    /// Parse dependencies from config
+    async fn resolve_spec(&self, config: &Config) -> Result<Vec<DependencySpec>>;
 
-    /// 解析多个依赖
+    /// 解析依赖并获取 proto 文件
     async fn resolve_dependencies(
         &self,
         specs: &[DependencySpec],
+        service_details: &[ServiceDetails],
     ) -> Result<Vec<ResolvedDependency>>;
 
     /// 检查依赖冲突

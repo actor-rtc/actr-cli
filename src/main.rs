@@ -19,7 +19,8 @@ use actr_cli::core::{
 
 // 导入命令实现
 use actr_cli::commands::{
-    Command as LegacyCommand, DiscoveryCommand, GenCommand, InitCommand, InstallCommand,
+    CheckCommand, Command as LegacyCommand, DiscoveryCommand, DocCommand, GenCommand, InitCommand,
+    InstallCommand,
 };
 
 /// ACTR-CLI - Actor-RTC Command Line Tool
@@ -46,19 +47,14 @@ enum Commands {
     /// Discover network services
     Discovery(DiscoveryCommand),
 
+    /// Generate project documentation
+    Doc(DocCommand),
+
     /// Generate code from proto files
     Gen(GenCommand),
 
     /// Validate project dependencies
-    Check {
-        /// Show detailed information
-        #[arg(long)]
-        verbose: bool,
-
-        /// Set timeout in seconds
-        #[arg(long, value_name = "SECONDS")]
-        timeout: Option<u64>,
-    },
+    Check(CheckCommand),
 }
 
 #[tokio::main]
@@ -220,17 +216,19 @@ async fn execute_command(
             // 执行命令
             command.execute(context).await
         }
-        Commands::Check { verbose, timeout } => {
-            // TODO: 实现 check 命令
-            if *verbose {
-                println!("Check mode: verbose");
+        Commands::Doc(cmd) => match cmd.execute().await {
+            Ok(_) => Ok(actr_cli::core::CommandResult::Success(
+                "Documentation generated".to_string(),
+            )),
+            Err(e) => Err(e.into()),
+        },
+        Commands::Check(cmd) => {
+            if cmd.config_file.is_none() {
+                let container = context.container.lock().unwrap();
+                container.validate(&cmd.required_components())?;
             }
-            if let Some(t) = timeout {
-                println!("Timeout: {} seconds", t);
-            }
-            Ok(actr_cli::core::CommandResult::Success(
-                "Check completed".to_string(),
-            ))
+
+            cmd.execute(context).await
         }
         Commands::Gen(cmd) => match cmd.execute().await {
             Ok(_) => Ok(actr_cli::core::CommandResult::Success(

@@ -33,7 +33,9 @@ pub enum SupportedLanguage {
 }
 
 // Re-export new architecture commands
+pub use check::CheckCommand;
 pub use discovery::DiscoveryCommand;
+pub use doc::DocCommand;
 pub use generate::GenCommand;
 pub use init::InitCommand;
 pub use install::InstallCommand;

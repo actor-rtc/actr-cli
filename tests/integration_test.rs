@@ -60,17 +60,17 @@ fn test_template_case_conversion() {
     use actr_cli::templates::TemplateContext;
 
     // Test snake_case conversion
-    let ctx = TemplateContext::new("MyProject", "ws://localhost:8080");
+    let ctx = TemplateContext::new("MyProject", "ws://localhost:8080", "echo-service");
     assert_eq!(ctx.project_name_snake, "my_project");
     assert_eq!(ctx.project_name_pascal, "MyProject");
 
     // Test kebab-case conversion
-    let ctx = TemplateContext::new("my-project", "ws://localhost:8080");
+    let ctx = TemplateContext::new("my-project", "ws://localhost:8080", "echo-service");
     assert_eq!(ctx.project_name_snake, "my_project");
     assert_eq!(ctx.project_name_pascal, "MyProject");
 
     // Test already snake_case
-    let ctx = TemplateContext::new("my_project", "ws://localhost:8080");
+    let ctx = TemplateContext::new("my_project", "ws://localhost:8080", "echo-service");
     assert_eq!(ctx.project_name_snake, "my_project");
     assert_eq!(ctx.project_name_pascal, "MyProject");
 }
@@ -87,7 +87,7 @@ fn test_project_template_basic_generation() {
     let template = ProjectTemplate::new(ProjectTemplateName::Echo, SupportedLanguage::Rust);
 
     // Create template context
-    let context = TemplateContext::new("test-service", "ws://localhost:8080");
+    let context = TemplateContext::new("test-service", "ws://localhost:8080", "echo-service");
 
     // Generate project files
     template

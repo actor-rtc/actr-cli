@@ -15,6 +15,9 @@ impl ProjectInitializer for KotlinInitializer {
             )));
         }
 
+        // Map template name to remote service name
+        let service_name = context.template.to_service_name();
+
         let project_name_pascal = to_pascal_case(&context.project_name);
         let package_name = to_package_name(&context.project_name);
         let package_path = package_name.replace('.', "/");
@@ -48,6 +51,10 @@ impl ProjectInitializer for KotlinInitializer {
         let app_dir = context.project_dir.join("app");
         let java_dir = app_dir.join("src/main/java").join(&package_path);
 
+        // Proto path with service_name variable
+        let proto_path = format!("protos/remote/{}/echo.proto", service_name);
+        let proto_app_path = format!("src/main/proto/remote/{}/echo.proto", service_name);
+
         // Root level files
         let files = vec![
             (
@@ -72,12 +79,12 @@ impl ProjectInitializer for KotlinInitializer {
             ),
             (
                 fixtures_root.join("echo-service/echo.proto"),
-                context.project_dir.join("protos/echo.proto"),
+                context.project_dir.join(&proto_path),
             ),
             // Also copy proto to app/src/main/proto for Gradle protobuf plugin
             (
                 fixtures_root.join("echo-service/echo.proto"),
-                app_dir.join("src/main/proto/echo.proto"),
+                app_dir.join(&proto_app_path),
             ),
             // App module files
             (
@@ -150,7 +157,7 @@ impl ProjectInitializer for KotlinInitializer {
         let generated_dir = java_dir.join("generated");
         std::fs::create_dir_all(&generated_dir)?;
 
-        let proto_file = context.project_dir.join("protos/echo.proto");
+        let proto_file = context.project_dir.join(&proto_path);
         let config_file = context.project_dir.join("Actr.toml");
         if proto_file.exists() {
             // Run actr gen command to generate Handler/Dispatcher and scaffold code
@@ -177,7 +184,8 @@ impl ProjectInitializer for KotlinInitializer {
                 }
                 Err(e) => {
                     tracing::warn!(
-                        "⚠️  Could not run 'actr gen'. Please run manually: actr gen -l kotlin -i protos/echo.proto -o app/src/main/java/{}/generated. Error: {}",
+                        "⚠️  Could not run 'actr gen'. Please run manually: actr gen -l kotlin -i {} -o app/src/main/java/{}/generated. Error: {}",
+                        proto_path,
                         package_path,
                         e
                     );

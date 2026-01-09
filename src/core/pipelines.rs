@@ -2,7 +2,7 @@
 //!
 //! 定义了三个核心操作管道，实现命令间的逻辑复用
 
-use actr_config::{Config, LockFile, LockedDependency, ProtoFileMeta, ServiceSpecMeta};
+use actr_config::{LockFile, LockedDependency, ProtoFileMeta, ServiceSpecMeta};
 use actr_protocol::ActrTypeExt;
 use anyhow::Result;
 use std::sync::Arc;
@@ -136,10 +136,21 @@ impl ValidationPipeline {
                     .as_path(),
             )
             .await?;
-        let dependency_specs = self.extract_dependency_specs(&config)?;
+        let dependency_specs = self.dependency_resolver.resolve_spec(&config).await?;
+
+        let mut service_details = Vec::new();
+        for spec in &dependency_specs {
+            match self.service_discovery.get_service_details(&spec.name).await {
+                Ok(details) => service_details.push(details),
+                Err(_) => {
+                    // Service might not be available, continue without details
+                }
+            }
+        }
+
         let resolved_dependencies = self
             .dependency_resolver
-            .resolve_dependencies(&dependency_specs)
+            .resolve_dependencies(&dependency_specs, &service_details)
             .await?;
 
         // 3. 冲突检查
@@ -253,73 +264,58 @@ impl ValidationPipeline {
                 value: dep.fingerprint.clone(),
             };
 
-            // 计算实际指纹
-            let service_info = match self
-                .service_discovery
-                .get_service_details(&dep.spec.name)
-                .await
-            {
-                Ok(details) => details.info,
-                Err(e) => {
-                    results.push(FingerprintValidation {
-                        dependency: dep.spec.alias.clone(),
-                        expected,
-                        actual: None,
-                        is_valid: false,
-                        error: Some(e.to_string()),
-                    });
-                    continue;
+            // 计算实际指纹（如果 resolved_dependencies 中没有指纹，从远程获取）
+            let actual_fp = if dep.fingerprint.is_empty() {
+                match self
+                    .service_discovery
+                    .get_service_details(&dep.spec.name)
+                    .await
+                {
+                    Ok(details) => {
+                        let computed = self
+                            .fingerprint_validator
+                            .compute_service_fingerprint(&details.info)
+                            .await?;
+                        Some(computed)
+                    }
+                    Err(e) => {
+                        results.push(FingerprintValidation {
+                            dependency: dep.spec.alias.clone(),
+                            expected,
+                            actual: None,
+                            is_valid: false,
+                            error: Some(e.to_string()),
+                        });
+                        continue;
+                    }
                 }
+            } else {
+                // 已有指纹，无需重新计算
+                None
             };
 
-            match self
-                .fingerprint_validator
-                .compute_service_fingerprint(&service_info)
-                .await
-            {
-                Ok(actual) => {
-                    let is_valid = self
-                        .fingerprint_validator
-                        .verify_fingerprint(&expected, &actual)
-                        .await
-                        .unwrap_or(false);
-                    results.push(FingerprintValidation {
-                        dependency: dep.spec.alias.clone(),
-                        expected,
-                        actual: Some(actual),
-                        is_valid,
-                        error: None,
-                    });
-                }
-                Err(e) => {
-                    results.push(FingerprintValidation {
-                        dependency: dep.spec.alias.clone(),
-                        expected,
-                        actual: None,
-                        is_valid: false,
-                        error: Some(e.to_string()),
-                    });
-                }
-            }
+            let is_valid = if expected.value.is_empty() {
+                true
+            } else if let Some(ref computed) = actual_fp {
+                self.fingerprint_validator
+                    .verify_fingerprint(&expected, computed)
+                    .await
+                    .unwrap_or(false)
+            } else {
+                // 指纹已匹配（来自 resolve_dependencies）
+                true
+            };
+
+            results.push(FingerprintValidation {
+                dependency: dep.spec.alias.clone(),
+                expected,
+                actual: actual_fp,
+                is_valid,
+                error: None,
+            });
         }
 
         Ok(results)
-    }
-
-    /// 从配置中提取依赖规范
-    fn extract_dependency_specs(&self, config: &Config) -> Result<Vec<DependencySpec>> {
-        let specs: Vec<DependencySpec> = config
-            .dependencies
-            .iter()
-            .map(|dependency| DependencySpec {
-                alias: dependency.alias.clone(),
-                actr_type: dependency.actr_type.clone(),
-                name: dependency.name.clone(),
-                fingerprint: dependency.fingerprint.clone(),
-            })
-            .collect();
-
-        Ok(specs)
     }
 }
 

@@ -3,7 +3,7 @@ use crate::templates::ProjectTemplate;
 use std::collections::HashMap;
 use std::path::Path;
 
-pub fn load(files: &mut HashMap<String, String>) -> Result<()> {
+pub fn load(files: &mut HashMap<String, String>, service_name: &str) -> Result<()> {
     let fixtures_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures");
 
     // Cargo.toml
@@ -23,11 +23,12 @@ pub fn load(files: &mut HashMap<String, String>) -> Result<()> {
         "Actr.toml",
     )?;
 
-    // proto/echo.proto
+    // proto/remote/{service_name}/echo.proto
+    let proto_path = format!("protos/remote/{}/echo.proto", service_name);
     ProjectTemplate::load_file(
         &fixtures_root.join("echo-service/echo.proto"),
         files,
-        "protos/echo.proto",
+        &proto_path,
     )?;
 
     // build.rs
