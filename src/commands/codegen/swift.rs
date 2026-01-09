@@ -544,36 +544,35 @@ impl SwiftGenerator {
 
                                     if let Some(returns_pos) = rest.find("returns") {
                                         let rest = &rest[returns_pos + 7..];
-                                        if let Some(output_start) = rest.find('(') {
-                                            if let Some(output_end) = rest.find(')') {
-                                                let output_type = rest
-                                                    [output_start + 1..output_end]
-                                                    .trim()
-                                                    .to_string();
+                                        if let Some(output_start) = rest.find('(')
+                                            && let Some(output_end) = rest.find(')')
+                                        {
+                                            let output_type = rest[output_start + 1..output_end]
+                                                .trim()
+                                                .to_string();
 
-                                                service.methods.push(ProtoMethod {
-                                                    name: method_name,
-                                                    swift_name,
-                                                    input_type: format!(
-                                                        "{}{}",
-                                                        service.swift_package_prefix, input_type
-                                                    ),
-                                                    output_type: format!(
-                                                        "{}{}",
-                                                        service.swift_package_prefix, output_type
-                                                    ),
-                                                });
-                                            }
+                                            service.methods.push(ProtoMethod {
+                                                name: method_name,
+                                                swift_name,
+                                                input_type: format!(
+                                                    "{}{}",
+                                                    service.swift_package_prefix, input_type
+                                                ),
+                                                output_type: format!(
+                                                    "{}{}",
+                                                    service.swift_package_prefix, output_type
+                                                ),
+                                            });
                                         }
                                     }
                                 }
                             }
                         }
 
-                        if line.contains('}') {
-                            if let Some(s) = current_service.take() {
-                                services.push(s);
-                            }
+                        if line.contains('}')
+                            && let Some(s) = current_service.take()
+                        {
+                            services.push(s);
                         }
                     }
                 }

@@ -245,6 +245,7 @@ impl ValidationPipeline {
             .into_iter()
             .map(|result| NetworkValidation {
                 is_reachable: result.connectivity.is_reachable,
+                health: result.health,
                 latency_ms: result.connectivity.response_time_ms,
                 error: result.connectivity.error,
             })

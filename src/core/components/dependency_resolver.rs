@@ -49,7 +49,7 @@ impl DependencyResolver for DefaultDependencyResolver {
             // Find matching service details
             let matching_details = service_details
                 .iter()
-                .find(|details| &details.info.name == &spec.name);
+                .find(|details| details.info.name == spec.name);
 
             let (fingerprint, proto_files) = match matching_details {
                 Some(details) => (

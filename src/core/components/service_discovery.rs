@@ -243,7 +243,8 @@ impl NetworkServiceDiscovery {
     fn matches_filter(entry: &discovery_response::TypeEntry, filter: &ServiceFilter) -> bool {
         if let Some(pattern) = &filter.name_pattern {
             let full_name = Self::format_actr_type(&entry.actr_type);
-            let matches = Self::matches_pattern(&full_name, pattern);
+            let matches = Self::matches_pattern(&entry.name, pattern)
+                || Self::matches_pattern(&full_name, pattern);
             if !matches {
                 return false;
             }

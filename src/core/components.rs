@@ -127,6 +127,7 @@ pub struct DependencyValidation {
 #[derive(Debug, Clone)]
 pub struct NetworkValidation {
     pub is_reachable: bool,
+    pub health: HealthStatus,
     pub latency_ms: Option<u64>,
     pub error: Option<String>,
 }
