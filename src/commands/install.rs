@@ -518,7 +518,7 @@ impl InstallCommand {
         }
 
         // Verify fingerprints match registered services (unless --force is used)
-        println!("  ├─ � Verifying fingerprints...");
+        println!("  ├─ ✅ Verifying fingerprints...");
         let fingerprint_mismatches = self
             .verify_fingerprints(&dependency_specs, &install_pipeline)
             .await?;
@@ -553,7 +553,7 @@ impl InstallCommand {
             // Reload dependency specs with updated fingerprints
             let dependency_specs = self.load_dependencies_from_config(context).await?;
 
-            println!("  ├─ �🔍 Service discovery (DiscoveryRequest)");
+            println!("  ├─ 🔍 Service discovery (DiscoveryRequest)");
             println!("  ├─ 🌐 Network connectivity test");
             println!("  └─ ✅ Installation plan generated");
             println!();
@@ -565,7 +565,7 @@ impl InstallCommand {
                 .await
             {
                 Ok(install_result) => {
-                    println!("  ├─ � Caching proto files ✅");
+                    println!("  ├─ 📚 Caching proto files ✅");
                     println!("  ├─ 🔒 Updating Actr.lock.toml ✅");
                     println!("  └─ ✅ Installation completed");
                     println!();

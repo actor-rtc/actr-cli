@@ -312,7 +312,7 @@ impl LanguageGenerator for KotlinGenerator {
         println!("\n🎉 Kotlin code generation completed!");
         println!("\n📋 Next steps:");
         println!("1. 📖 View generated code: {:?}", context.output);
-        println!("2. � Copy generated files to your Android/Kotlin project");
+        println!("2. 📚 Copy generated files to your Android/Kotlin project");
         println!("3. 📦 Ensure protobuf gradle plugin is configured for message classes");
         println!("4. ✏️  Implement the Handler interface in your service class");
         println!("5. 🏗️  Build project: ./gradlew build");
