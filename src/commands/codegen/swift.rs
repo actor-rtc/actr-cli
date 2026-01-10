@@ -385,6 +385,7 @@ impl SwiftGenerator {
     }
 
     /// Recursively removes empty subdirectories from the output directory.
+    #[allow(clippy::only_used_in_recursion)]
     fn remove_empty_subdirectories(&self, dir: &Path) -> Result<()> {
         if dir.is_dir() {
             for entry in std::fs::read_dir(dir)? {

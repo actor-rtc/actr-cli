@@ -302,6 +302,7 @@ impl GenCommand {
     }
 
     /// Collect proto files recursively
+    #[allow(clippy::only_used_in_recursion)]
     fn collect_proto_files(&self, dir: &PathBuf, proto_files: &mut Vec<PathBuf>) -> Result<()> {
         for entry in std::fs::read_dir(dir)
             .map_err(|e| ActrCliError::config_error(format!("Failed to read directory: {e}")))?
