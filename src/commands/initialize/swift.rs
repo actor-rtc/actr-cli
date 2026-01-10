@@ -11,8 +11,9 @@ pub struct SwiftInitializer;
 impl ProjectInitializer for SwiftInitializer {
     fn generate_project_structure(&self, context: &InitContext) -> Result<()> {
         let template = ProjectTemplate::new(context.template, SupportedLanguage::Swift);
-
-        let template_context = TemplateContext::new(&context.project_name, &context.signaling_url);
+        let service_name = context.template.to_service_name();
+        let template_context =
+            TemplateContext::new(&context.project_name, &context.signaling_url, service_name);
 
         template.generate(&context.project_dir, &template_context)?;
 
@@ -23,15 +24,18 @@ impl ProjectInitializer for SwiftInitializer {
     }
 
     fn print_next_steps(&self, context: &InitContext) {
-        let template_context = TemplateContext::new(&context.project_name, &context.signaling_url);
+        let service_name = context.template.to_service_name();
+        let template_context =
+            TemplateContext::new(&context.project_name, &context.signaling_url, service_name);
+        let proto_path = format!("protos/remote/{}/echo.proto", service_name);
         info!("");
         info!("Next steps:");
         if !context.is_current_dir {
             info!("  cd {}", context.project_dir.display());
         }
         info!(
-            "  actr gen -l swift -i protos/echo.proto -o {}/Generated",
-            template_context.project_name_pascal
+            "  actr gen -l swift -i {} -o {}/Generated",
+            proto_path, template_context.project_name_pascal
         );
         info!("  xcodegen generate");
         info!("  open {}.xcodeproj", template_context.project_name_pascal);

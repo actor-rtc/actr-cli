@@ -2,14 +2,25 @@
 //!
 //! 定义了8个核心组件的trait接口，支持依赖注入和组合使用
 
+pub mod cache_manager;
 pub mod config_manager;
 pub mod dependency_resolver;
+pub mod fingerprint_validator;
+pub mod network_validator;
+pub mod proto_processor;
 pub mod service_discovery;
-pub use actr_config::Config;
+pub mod user_interface;
+use actr_protocol::{ActrType, discovery_response::TypeEntry};
+pub use cache_manager::DefaultCacheManager;
 pub use config_manager::TomlConfigManager;
 pub use dependency_resolver::DefaultDependencyResolver;
+pub use fingerprint_validator::DefaultFingerprintValidator;
+pub use network_validator::DefaultNetworkValidator;
+pub use proto_processor::DefaultProtoProcessor;
 pub use service_discovery::NetworkServiceDiscovery;
+pub use user_interface::ConsoleUI;
 
+use actr_config::Config;
 use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -22,9 +33,9 @@ use std::path::{Path, PathBuf};
 /// 依赖规范
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DependencySpec {
+    pub alias: String,
     pub name: String,
-    pub uri: String,
-    pub version: Option<String>,
+    pub actr_type: Option<ActrType>,
     pub fingerprint: Option<String>,
 }
 
@@ -32,8 +43,6 @@ pub struct DependencySpec {
 #[derive(Debug, Clone)]
 pub struct ResolvedDependency {
     pub spec: DependencySpec,
-    pub uri: String,
-    pub resolved_version: String,
     pub fingerprint: String,
     pub proto_files: Vec<ProtoFile>,
 }
@@ -65,10 +74,12 @@ pub struct MethodDefinition {
 /// 服务信息
 #[derive(Debug, Clone)]
 pub struct ServiceInfo {
+    /// Service name (package name)
     pub name: String,
-    pub uri: String,
-    pub version: String,
+    pub tags: Vec<String>,
     pub fingerprint: String,
+    pub actr_type: ActrType,
+    pub published_at: Option<i64>,
     pub description: Option<String>,
     pub methods: Vec<MethodDefinition>,
 }
@@ -110,14 +121,13 @@ pub struct ConfigValidation {
 pub struct DependencyValidation {
     pub dependency: String,
     pub is_available: bool,
-    pub resolved_uri: Option<String>,
     pub error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct NetworkValidation {
-    pub uri: String,
     pub is_reachable: bool,
+    pub health: HealthStatus,
     pub latency_ms: Option<u64>,
     pub error: Option<String>,
 }
@@ -212,13 +222,14 @@ pub struct ConfigBackup {
 /// 依赖解析和冲突检测
 #[async_trait]
 pub trait DependencyResolver: Send + Sync {
-    /// 解析依赖规范字符串
-    async fn resolve_spec(&self, spec: &str) -> Result<DependencySpec>;
+    /// Parse dependencies from config
+    async fn resolve_spec(&self, config: &Config) -> Result<Vec<DependencySpec>>;
 
-    /// 解析多个依赖
+    /// 解析依赖并获取 proto 文件
     async fn resolve_dependencies(
         &self,
         specs: &[DependencySpec],
+        service_details: &[ServiceDetails],
     ) -> Result<Vec<ResolvedDependency>>;
 
     /// 检查依赖冲突
@@ -246,13 +257,13 @@ pub trait ServiceDiscovery: Send + Sync {
     async fn discover_services(&self, filter: Option<&ServiceFilter>) -> Result<Vec<ServiceInfo>>;
 
     /// 获取服务详细信息
-    async fn get_service_details(&self, uri: &str) -> Result<ServiceDetails>;
+    async fn get_service_details(&self, name: &str) -> Result<ServiceDetails>;
 
     /// 检查服务可用性
-    async fn check_service_availability(&self, uri: &str) -> Result<AvailabilityStatus>;
+    async fn check_service_availability(&self, name: &str) -> Result<AvailabilityStatus>;
 
     /// 获取服务Proto文件
-    async fn get_service_proto(&self, uri: &str) -> Result<Vec<ProtoFile>>;
+    async fn get_service_proto(&self, name: &str) -> Result<Vec<ProtoFile>>;
 }
 
 #[derive(Debug, Clone)]
@@ -285,16 +296,16 @@ pub enum HealthStatus {
 #[async_trait]
 pub trait NetworkValidator: Send + Sync {
     /// 检查连通性
-    async fn check_connectivity(&self, uri: &str) -> Result<ConnectivityStatus>;
+    async fn check_connectivity(&self, service_name: &str) -> Result<ConnectivityStatus>;
 
     /// 验证服务健康状态
-    async fn verify_service_health(&self, uri: &str) -> Result<HealthStatus>;
+    async fn verify_service_health(&self, service_name: &str) -> Result<HealthStatus>;
 
     /// 测试延迟
-    async fn test_latency(&self, uri: &str) -> Result<LatencyInfo>;
+    async fn test_latency(&self, service_name: &str) -> Result<LatencyInfo>;
 
     /// 批量检查
-    async fn batch_check(&self, uris: &[String]) -> Result<Vec<NetworkCheckResult>>;
+    async fn batch_check(&self, service_names: &[String]) -> Result<Vec<NetworkCheckResult>>;
 }
 
 #[derive(Debug, Clone)]
@@ -314,7 +325,6 @@ pub struct LatencyInfo {
 
 #[derive(Debug, Clone)]
 pub struct NetworkCheckResult {
-    pub uri: String,
     pub connectivity: ConnectivityStatus,
     pub health: HealthStatus,
     pub latency: Option<LatencyInfo>,
@@ -379,13 +389,13 @@ pub struct GenerationResult {
 #[async_trait]
 pub trait CacheManager: Send + Sync {
     /// 获取缓存的Proto
-    async fn get_cached_proto(&self, uri: &str) -> Result<Option<CachedProto>>;
+    async fn get_cached_proto(&self, service_name: &str) -> Result<Option<CachedProto>>;
 
     /// 缓存Proto文件
-    async fn cache_proto(&self, uri: &str, proto: &[ProtoFile]) -> Result<()>;
+    async fn cache_proto(&self, service_name: &str, proto: &[ProtoFile]) -> Result<()>;
 
     /// 失效缓存
-    async fn invalidate_cache(&self, uri: &str) -> Result<()>;
+    async fn invalidate_cache(&self, service_name: &str) -> Result<()>;
 
     /// 清理缓存
     async fn clear_cache(&self) -> Result<()>;
@@ -396,7 +406,6 @@ pub trait CacheManager: Send + Sync {
 
 #[derive(Debug, Clone)]
 pub struct CachedProto {
-    pub uri: String,
     pub files: Vec<ProtoFile>,
     pub fingerprint: Fingerprint,
     pub cached_at: std::time::SystemTime,
@@ -424,19 +433,8 @@ pub trait UserInterface: Send + Sync {
     /// 确认操作
     async fn confirm(&self, message: &str) -> Result<bool>;
 
-    /// 从服务列表中选择
-    async fn select_service_from_list(
-        &self,
-        items: &[ServiceInfo],
-        formatter: fn(&ServiceInfo) -> String,
-    ) -> Result<usize>;
-
-    /// 从字符串列表中选择
-    async fn select_string_from_list(
-        &self,
-        items: &[String],
-        formatter: fn(&String) -> String,
-    ) -> Result<usize>;
+    /// 从列表中选择一项
+    async fn select_from_list(&self, items: &[String], prompt: &str) -> Result<usize>;
 
     /// 显示服务表格
     async fn display_service_table(
@@ -455,4 +453,22 @@ pub trait ProgressBar: Send + Sync {
     fn update(&self, progress: f64);
     fn set_message(&self, message: &str);
     fn finish(&self);
+}
+
+impl From<TypeEntry> for ServiceInfo {
+    fn from(entry: TypeEntry) -> Self {
+        let name = entry.name.clone();
+        let tags = entry.tags.clone();
+        let actr_type = entry.actr_type.clone();
+
+        Self {
+            name,
+            actr_type,
+            tags,
+            published_at: entry.published_at,
+            fingerprint: entry.service_fingerprint,
+            description: entry.description,
+            methods: Vec::new(),
+        }
+    }
 }

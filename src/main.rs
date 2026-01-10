@@ -11,13 +11,16 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 // 导入核心复用组件
 use actr_cli::core::{
-    ActrCliError, Command, CommandContext, ContainerBuilder, DefaultDependencyResolver,
-    ErrorReporter, NetworkServiceDiscovery, ServiceContainer, TomlConfigManager,
+    ActrCliError, Command, CommandContext, ConfigManager, ConsoleUI, ContainerBuilder,
+    DefaultCacheManager, DefaultDependencyResolver, DefaultFingerprintValidator,
+    DefaultNetworkValidator, DefaultProtoProcessor, ErrorReporter, NetworkServiceDiscovery,
+    ServiceContainer, TomlConfigManager,
 };
 
 // 导入命令实现
 use actr_cli::commands::{
-    Command as LegacyCommand, DiscoveryCommand, GenCommand, InitCommand, InstallCommand,
+    CheckCommand, Command as LegacyCommand, DiscoveryCommand, DocCommand, GenCommand, InitCommand,
+    InstallCommand,
 };
 
 /// ACTR-CLI - Actor-RTC Command Line Tool
@@ -44,19 +47,14 @@ enum Commands {
     /// Discover network services
     Discovery(DiscoveryCommand),
 
+    /// Generate project documentation
+    Doc(DocCommand),
+
     /// Generate code from proto files
     Gen(GenCommand),
 
     /// Validate project dependencies
-    Check {
-        /// Show detailed information
-        #[arg(long)]
-        verbose: bool,
-
-        /// Set timeout in seconds
-        #[arg(long, value_name = "SECONDS")]
-        timeout: Option<u64>,
-    },
+    Check(CheckCommand),
 }
 
 #[tokio::main]
@@ -67,7 +65,12 @@ async fn main() -> Result<()> {
         .with_level(true)
         .with_line_number(true)
         .with_file(true);
-    let _ = tracing_subscriber::registry().with(layer).try_init();
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("off"));
+    let _ = tracing_subscriber::registry()
+        .with(filter)
+        .with(layer)
+        .try_init();
 
     // 使用 clap 解析命令行参数
     let cli = Cli::parse();
@@ -113,9 +116,13 @@ async fn main() -> Result<()> {
         Err(e) => {
             // 统一的错误处理
             if let Some(cli_error) = e.downcast_ref::<ActrCliError>() {
+                if matches!(cli_error, ActrCliError::OperationCancelled) {
+                    // Exit silently
+                    std::process::exit(0);
+                }
                 eprintln!("{}", ErrorReporter::format_error(cli_error));
             } else {
-                eprintln!("Error: {e}");
+                eprintln!("Error: {e:?}");
             }
             std::process::exit(1);
         }
@@ -128,6 +135,7 @@ async fn main() -> Result<()> {
 async fn build_container() -> Result<ServiceContainer> {
     let config_path = std::path::Path::new("Actr.toml");
     let mut builder = ContainerBuilder::new();
+    let mut config_manager = None;
 
     if config_path.exists() {
         builder = builder.config_path(config_path);
@@ -135,14 +143,36 @@ async fn build_container() -> Result<ServiceContainer> {
 
     let mut container = builder.build()?;
 
+    // Register UI component (always available)
+    container = container.register_user_interface(Arc::new(ConsoleUI::new()));
+
     if config_path.exists() {
-        container =
-            container.register_config_manager(Arc::new(TomlConfigManager::new(config_path)));
+        let manager = Arc::new(TomlConfigManager::new(config_path));
+        container = container.register_config_manager(manager.clone());
+        config_manager = Some(manager);
     }
 
-    let container = container
-        .register_dependency_resolver(Arc::new(DefaultDependencyResolver::new()))
-        .register_service_discovery(Arc::new(NetworkServiceDiscovery::new()));
+    let mut container =
+        container.register_dependency_resolver(Arc::new(DefaultDependencyResolver::new()));
+
+    // Register network validator (stub implementation)
+    container = container.register_network_validator(Arc::new(DefaultNetworkValidator::new()));
+
+    // Register fingerprint validator
+    container =
+        container.register_fingerprint_validator(Arc::new(DefaultFingerprintValidator::new()));
+
+    // Register proto processor
+    container = container.register_proto_processor(Arc::new(DefaultProtoProcessor::new()));
+
+    // Register cache manager
+    container = container.register_cache_manager(Arc::new(DefaultCacheManager::new()));
+
+    if let Some(manager) = config_manager {
+        let config = manager.load_config(config_path).await?;
+        container =
+            container.register_service_discovery(Arc::new(NetworkServiceDiscovery::new(config)));
+    }
     Ok(container)
 }
 
@@ -186,17 +216,19 @@ async fn execute_command(
             // 执行命令
             command.execute(context).await
         }
-        Commands::Check { verbose, timeout } => {
-            // TODO: 实现 check 命令
-            if *verbose {
-                println!("Check mode: verbose");
+        Commands::Doc(cmd) => match cmd.execute().await {
+            Ok(_) => Ok(actr_cli::core::CommandResult::Success(
+                "Documentation generated".to_string(),
+            )),
+            Err(e) => Err(e.into()),
+        },
+        Commands::Check(cmd) => {
+            if cmd.config_file.is_none() {
+                let container = context.container.lock().unwrap();
+                container.validate(&cmd.required_components())?;
             }
-            if let Some(t) = timeout {
-                println!("Timeout: {} seconds", t);
-            }
-            Ok(actr_cli::core::CommandResult::Success(
-                "Check completed".to_string(),
-            ))
+
+            cmd.execute(context).await
         }
         Commands::Gen(cmd) => match cmd.execute().await {
             Ok(_) => Ok(actr_cli::core::CommandResult::Success(

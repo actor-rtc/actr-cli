@@ -27,6 +27,15 @@ pub enum ProjectTemplateName {
     Echo,
 }
 
+impl ProjectTemplateName {
+    /// Maps template name to remote service name
+    pub fn to_service_name(self) -> &'static str {
+        match self {
+            ProjectTemplateName::Echo => "echo-service",
+        }
+    }
+}
+
 impl std::fmt::Display for ProjectTemplateName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let pv = self
@@ -53,20 +62,24 @@ pub struct TemplateContext {
 }
 
 impl TemplateContext {
-    pub fn new(project_name: &str, signaling_url: &str) -> Self {
+    pub fn new(project_name: &str, signaling_url: &str, service_name: &str) -> Self {
         Self {
             project_name: project_name.to_string(),
             project_name_snake: to_snake_case(project_name),
             project_name_pascal: to_pascal_case(project_name),
             signaling_url: signaling_url.to_string(),
             manufacturer: "unknown".to_string(),
-            service_name: "UnknownService".to_string(),
+            service_name: service_name.to_string(),
         }
     }
 }
 
 pub trait LangTemplate: Send + Sync {
-    fn load_files(&self, template_name: ProjectTemplateName) -> Result<HashMap<String, String>>;
+    fn load_files(
+        &self,
+        template_name: ProjectTemplateName,
+        service_name: &str,
+    ) -> Result<HashMap<String, String>>;
 }
 
 pub struct ProjectTemplate {
@@ -100,7 +113,9 @@ impl ProjectTemplate {
     }
 
     pub fn generate(&self, project_path: &Path, context: &TemplateContext) -> Result<()> {
-        let files = self.lang_template.load_files(self.name)?;
+        let files = self
+            .lang_template
+            .load_files(self.name, &context.service_name)?;
         let handlebars = Handlebars::new();
 
         for (file_path, content) in &files {
@@ -128,11 +143,12 @@ mod tests {
 
     #[test]
     fn test_template_context() {
-        let ctx = TemplateContext::new("my-chat-service", "ws://localhost:8080");
+        let ctx = TemplateContext::new("my-chat-service", "ws://localhost:8080", "echo-service");
         assert_eq!(ctx.project_name, "my-chat-service");
         assert_eq!(ctx.project_name_snake, "my_chat_service");
         assert_eq!(ctx.project_name_pascal, "MyChatService");
         assert_eq!(ctx.signaling_url, "ws://localhost:8080");
+        assert_eq!(ctx.service_name, "echo-service");
     }
 
     #[test]
@@ -145,7 +161,7 @@ mod tests {
     fn test_project_template_generation() {
         let temp_dir = TempDir::new().unwrap();
         let template = ProjectTemplate::new(ProjectTemplateName::Echo, SupportedLanguage::Swift);
-        let context = TemplateContext::new("test-app", "ws://localhost:8080");
+        let context = TemplateContext::new("test-app", "ws://localhost:8080", "echo-service");
 
         template
             .generate(temp_dir.path(), &context)
@@ -158,7 +174,12 @@ mod tests {
         // Verify .gitignore exists
         assert!(temp_dir.path().join(".gitignore").exists());
         // Verify proto file exists
-        assert!(temp_dir.path().join("protos/echo.proto").exists());
+        assert!(
+            temp_dir
+                .path()
+                .join("protos/remote/echo-service/echo.proto")
+                .exists()
+        );
         // Verify app directory exists
         assert!(
             temp_dir
@@ -172,7 +193,9 @@ mod tests {
     #[test]
     fn test_project_template_load_files() {
         let template = ProjectTemplate::new(ProjectTemplateName::Echo, SupportedLanguage::Swift);
-        let result = template.lang_template.load_files(ProjectTemplateName::Echo);
+        let result = template
+            .lang_template
+            .load_files(ProjectTemplateName::Echo, "echo-service");
         assert!(result.is_ok());
     }
 }

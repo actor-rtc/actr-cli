@@ -12,6 +12,16 @@ categories = ["command-line-utilities", "development-tools"]
 name = "actr"
 path = "src/main.rs"
 
+[patch.crates-io]
+# actr-protocol = { path = "../actr/crates/protocol" }
+# actr-config = { path = "../actr/crates/config" }
+# actr-version = { path = "../actr/crates/version" }
+# actr-framework-protoc-codegen = { path = "../actr/crates/framework-protoc-codegen" }
+actr-protocol = { git = "https://github.com/actor-rtc/actr.git", rev = "09757bb556045d2b85edf4812c12db2afd3d2dd5" }
+actr-config = { git = "https://github.com/actor-rtc/actr.git", rev = "09757bb556045d2b85edf4812c12db2afd3d2dd5" }
+actr-version = { git = "https://github.com/actor-rtc/actr.git", rev = "09757bb556045d2b85edf4812c12db2afd3d2dd5" }
+actr-framework-protoc-codegen = { git = "https://github.com/actor-rtc/actr.git", rev = "09757bb556045d2b85edf4812c12db2afd3d2dd5" }
+
 [dependencies]
 # Actor-RTC crates - only what CLI actually needs
 actr-config = "0.1.7"
@@ -21,6 +31,7 @@ actr-framework-protoc-codegen = "0.1.6"
 
 # Command line interface
 clap = { version = "4.5.53", features = ["derive", "cargo"] }
+dialoguer = "0.12.0"
 
 # Error handling
 anyhow = "1.0"
@@ -33,6 +44,7 @@ async-trait = "0.1"
 fs_extra = "1.3"
 tempfile = "3.22"
 dirs = "5.0"
+walkdir = "2.5"
 
 # Process management
 tokio = { version = "1.48.0", features = ["full"] }
@@ -58,6 +70,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9.33"
 toml = "0.9.8"
+toml_edit = "0.22"
 
 # Date/time handling for lock files
 chrono = { version = "0.4", features = ["serde"] }
@@ -75,7 +88,10 @@ prost-types = "0.14.1"
 quote = "1.0"
 proc-macro2 = "1.0"
 bytes = "1.0"
-heck = "0.4"        # for case conversion
+heck = "0.5.0"                                   # for case conversion
+tokio-tungstenite = "0.28.0"
+futures-util = "0.3.31"
+uuid = { version = "1.19.0", features = ["v4"] }
 
 [dev-dependencies]
 tokio-test = "0.4"

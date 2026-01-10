@@ -13,17 +13,32 @@ pub enum ActrCliError {
     #[error("Invalid project: {message}")]
     InvalidProject { message: String },
 
+    #[error("Invalid argument: {message}")]
+    InvalidArgument { message: String },
+
     #[error("Network error: {message}")]
     Network { message: String },
 
     #[error("Dependency error: {message}")]
     Dependency { message: String },
 
+    #[error("Dependency conflict: {message}")]
+    DependencyConflict { message: String },
+
+    #[error("Service not found: {name}")]
+    ServiceNotFound { name: String },
+
     #[error("Service discovery error: {message}")]
     ServiceDiscovery { message: String },
 
     #[error("Fingerprint validation error: {message}")]
     FingerprintValidation { message: String },
+
+    #[error("Fingerprint mismatch: expected {expected}, got {actual}")]
+    FingerprintMismatch { expected: String, actual: String },
+
+    #[error("Compatibility conflict: {message}")]
+    CompatibilityConflict { message: String },
 
     #[error("Code generation error: {message}")]
     CodeGeneration { message: String },
@@ -45,6 +60,9 @@ pub enum ActrCliError {
 
     #[error("Component not registered: {component}")]
     ComponentNotRegistered { component: String },
+
+    #[error("Operation cancelled")]
+    OperationCancelled,
 
     #[error("IO error")]
     Io(#[from] std::io::Error),
@@ -68,8 +86,8 @@ pub enum InstallError {
     #[error("Service unavailable: {service}")]
     ServiceUnavailable { service: String },
 
-    #[error("Network connection failed: {uri}")]
-    NetworkConnectionFailed { uri: String },
+    #[error("Network connection failed")]
+    NetworkConnectionFailed,
 
     #[error("Fingerprint mismatch: {service} - expected: {expected}, actual: {actual}")]
     FingerprintMismatch {
@@ -100,8 +118,8 @@ pub enum ValidationError {
     #[error("Dependency not found: {dependency}")]
     DependencyNotFound { dependency: String },
 
-    #[error("Network unreachable: {uri}")]
-    NetworkUnreachable { uri: String },
+    #[error("Network unreachable")]
+    NetworkUnreachable,
 
     #[error("Fingerprint mismatch: {service}")]
     FingerprintMismatch { service: String },
@@ -234,8 +252,7 @@ impl From<super::components::ValidationReport> for ActrCliError {
         for net in &report.network_validation {
             if !net.is_reachable {
                 details.push(format!(
-                    "Network unreachable: {} - {}",
-                    net.uri,
+                    "Network unreachable: {}",
                     net.error.as_deref().unwrap_or("connection failed")
                 ));
             }
@@ -339,11 +356,10 @@ impl ErrorReporter {
                     .latency_ms
                     .map(|ms| format!(" ({ms}ms)"))
                     .unwrap_or_default();
-                output.push(format!("   ✅ {}{}", net.uri, latency));
+                output.push(format!("   ✅ Connected{}", latency));
             } else {
                 output.push(format!(
-                    "   ❌ {} - {}",
-                    net.uri,
+                    "   ❌ Connection failed - {}",
                     net.error.as_deref().unwrap_or("unreachable")
                 ));
             }

@@ -22,3 +22,8 @@ target
 
 # macOS
 .DS_Store
+my-actor-project
+
+.*
+!.gitignore
+!.github

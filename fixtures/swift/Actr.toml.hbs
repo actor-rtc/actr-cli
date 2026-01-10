@@ -2,7 +2,7 @@ edition = 1
 exports = []
 
 [package]
-name = "{{PROJECT_NAME}}-client-app"
+name = "{{PROJECT_NAME}}"
 description = "Echo client app"
 authors = ["Actr-Team"]
 license = "Apache-2.0"
@@ -20,7 +20,7 @@ echo = { actr_type = "acme+EchoService" }
 url = "{{SIGNALING_URL}}/signaling/ws"
 
 [system.deployment]
-realm = 0
+realm_id = 0
 
 [system.discovery]
 visible = true
@@ -29,7 +29,7 @@ visible = true
 filter_level = "debug"
 tracing_enabled = true
 tracing_endpoint = "http://127.0.0.1:4317"
-tracing_service_name = "{{PROJECT_NAME}}-client-app"
+tracing_service_name = "{{PROJECT_NAME}}"
 
 [system.webrtc]
 force_relay = false

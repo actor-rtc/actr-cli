@@ -16,7 +16,7 @@ authors = []
 url = "{{SIGNALING_URL}}"
 
 [system.deployment]
-realm = 2281844430
+realm_id = 2281844430
 
 [system.discovery]
 visible = false

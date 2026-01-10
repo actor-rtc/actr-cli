@@ -1,9 +1,10 @@
+use actr_config::Config;
 use anyhow::Result;
 use async_trait::async_trait;
 
 use super::{
     ConflictReport, ConflictType, DependencyGraph, DependencyResolver, DependencySpec,
-    ResolvedDependency,
+    ResolvedDependency, ServiceDetails,
 };
 
 pub struct DefaultDependencyResolver;
@@ -11,80 +12,6 @@ pub struct DefaultDependencyResolver;
 impl DefaultDependencyResolver {
     pub fn new() -> Self {
         Self
-    }
-
-    fn parse_actr_uri(&self, spec: &str) -> Result<DependencySpec> {
-        let without_scheme = spec
-            .strip_prefix("actr://")
-            .ok_or_else(|| anyhow::anyhow!("Invalid actr:// URI: {spec}"))?;
-        let name_end = without_scheme
-            .find(|c| ['/', '?'].contains(&c))
-            .unwrap_or(without_scheme.len());
-        let name = without_scheme[..name_end].trim();
-        if name.is_empty() {
-            return Err(anyhow::anyhow!("Invalid actr:// URI: {spec}"));
-        }
-
-        let mut version = None;
-        let mut fingerprint = None;
-        if let Some(query_start) = spec.find('?') {
-            let query = &spec[query_start + 1..];
-            for pair in query.split('&') {
-                if pair.is_empty() {
-                    continue;
-                }
-                let mut iter = pair.splitn(2, '=');
-                let key = iter.next().unwrap_or_default();
-                let value = iter.next().unwrap_or_default();
-                match key {
-                    "version" if !value.is_empty() => {
-                        version = Some(value.to_string());
-                    }
-                    "fingerprint" if !value.is_empty() => {
-                        fingerprint = Some(value.to_string());
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        Ok(DependencySpec {
-            name: name.to_string(),
-            uri: spec.to_string(),
-            version,
-            fingerprint,
-        })
-    }
-
-    fn parse_versioned_spec(&self, spec: &str) -> Result<DependencySpec> {
-        let (name, version) = spec
-            .rsplit_once('@')
-            .ok_or_else(|| anyhow::anyhow!("Invalid package specification: {spec}"))?;
-        if name.is_empty() || version.is_empty() {
-            return Err(anyhow::anyhow!("Invalid package specification: {spec}"));
-        }
-
-        let uri = format!("actr://{name}/?version={version}");
-        Ok(DependencySpec {
-            name: name.to_string(),
-            uri,
-            version: Some(version.to_string()),
-            fingerprint: None,
-        })
-    }
-
-    fn parse_simple_spec(&self, spec: &str) -> Result<DependencySpec> {
-        let name = spec.trim();
-        if name.is_empty() {
-            return Err(anyhow::anyhow!("Invalid package specification: {spec}"));
-        }
-        let uri = format!("actr://{name}/");
-        Ok(DependencySpec {
-            name: name.to_string(),
-            uri,
-            version: None,
-            fingerprint: None,
-        })
     }
 }
 
@@ -96,31 +23,46 @@ impl Default for DefaultDependencyResolver {
 
 #[async_trait]
 impl DependencyResolver for DefaultDependencyResolver {
-    async fn resolve_spec(&self, spec: &str) -> Result<DependencySpec> {
-        if spec.starts_with("actr://") {
-            return self.parse_actr_uri(spec);
-        }
+    async fn resolve_spec(&self, config: &Config) -> Result<Vec<DependencySpec>> {
+        let specs: Vec<DependencySpec> = config
+            .dependencies
+            .iter()
+            .map(|dependency| DependencySpec {
+                alias: dependency.alias.clone(),
+                name: dependency.name.clone(),
+                actr_type: dependency.actr_type.clone(),
+                fingerprint: dependency.fingerprint.clone(),
+            })
+            .collect();
 
-        if spec.contains('@') {
-            return self.parse_versioned_spec(spec);
-        }
-
-        self.parse_simple_spec(spec)
+        Ok(specs)
     }
 
     async fn resolve_dependencies(
         &self,
         specs: &[DependencySpec],
+        service_details: &[ServiceDetails],
     ) -> Result<Vec<ResolvedDependency>> {
         let mut resolved = Vec::with_capacity(specs.len());
 
         for spec in specs {
+            // Find matching service details
+            let matching_details = service_details
+                .iter()
+                .find(|details| details.info.name == spec.name);
+
+            let (fingerprint, proto_files) = match matching_details {
+                Some(details) => (
+                    details.info.fingerprint.clone(),
+                    details.proto_files.clone(),
+                ),
+                None => (spec.fingerprint.clone().unwrap_or_default(), Vec::new()),
+            };
+
             resolved.push(ResolvedDependency {
                 spec: spec.clone(),
-                uri: spec.uri.clone(),
-                resolved_version: spec.version.clone().unwrap_or_else(|| "latest".to_string()),
-                fingerprint: spec.fingerprint.clone().unwrap_or_default(),
-                proto_files: Vec::new(),
+                fingerprint,
+                proto_files,
             });
         }
 
@@ -132,20 +74,28 @@ impl DependencyResolver for DefaultDependencyResolver {
 
         for i in 0..deps.len() {
             for j in (i + 1)..deps.len() {
-                if deps[i].spec.name != deps[j].spec.name {
-                    continue;
+                // Conflict if same alias is used
+                if deps[i].spec.alias == deps[j].spec.alias {
+                    // Same alias is always a conflict if they point to different things
+                    if deps[i].spec.name != deps[j].spec.name
+                        || deps[i].fingerprint != deps[j].fingerprint
+                    {
+                        conflicts.push(ConflictReport {
+                            dependency_a: deps[i].spec.alias.clone(),
+                            dependency_b: deps[j].spec.alias.clone(),
+                            conflict_type: ConflictType::VersionConflict,
+                            description: format!(
+                                "Dependency alias '{}' is duplicated with different targets",
+                                deps[i].spec.alias
+                            ),
+                        });
+                        continue;
+                    }
                 }
 
-                if deps[i].resolved_version != deps[j].resolved_version {
-                    conflicts.push(ConflictReport {
-                        dependency_a: deps[i].spec.name.clone(),
-                        dependency_b: deps[j].spec.name.clone(),
-                        conflict_type: ConflictType::VersionConflict,
-                        description: format!(
-                            "Dependency {} has conflicting versions: {} vs {}",
-                            deps[i].spec.name, deps[i].resolved_version, deps[j].resolved_version
-                        ),
-                    });
+                // Conflict if same package name has different fingerprints
+                if deps[i].spec.name != deps[j].spec.name {
+                    continue;
                 }
 
                 if !deps[i].fingerprint.is_empty()
@@ -153,8 +103,8 @@ impl DependencyResolver for DefaultDependencyResolver {
                     && deps[i].fingerprint != deps[j].fingerprint
                 {
                     conflicts.push(ConflictReport {
-                        dependency_a: deps[i].spec.name.clone(),
-                        dependency_b: deps[j].spec.name.clone(),
+                        dependency_a: format!("{} ({})", deps[i].spec.name, deps[i].spec.alias),
+                        dependency_b: format!("{} ({})", deps[j].spec.name, deps[j].spec.alias),
                         conflict_type: ConflictType::FingerprintMismatch,
                         description: format!(
                             "Dependency {} has conflicting fingerprints",
@@ -169,12 +119,7 @@ impl DependencyResolver for DefaultDependencyResolver {
     }
 
     async fn build_dependency_graph(&self, deps: &[ResolvedDependency]) -> Result<DependencyGraph> {
-        let mut nodes = Vec::new();
-        for dep in deps {
-            if !nodes.contains(&dep.spec.name) {
-                nodes.push(dep.spec.name.clone());
-            }
-        }
+        let nodes: Vec<String> = deps.iter().map(|d| d.spec.alias.clone()).collect();
 
         Ok(DependencyGraph {
             nodes,

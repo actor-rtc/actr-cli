@@ -7,6 +7,7 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
 use tracing::{debug, info};
+use walkdir::WalkDir;
 
 const ACTR_SERVICE_TEMPLATE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -50,67 +51,98 @@ impl LanguageGenerator for SwiftGenerator {
             context.input_path.as_path()
         };
 
+        // 1. Separate local and remote files, and build relative paths
+        let mut remote_paths = Vec::new();
+        let mut local_paths = Vec::new();
+
         for proto_file in &context.proto_files {
-            info!("Processing proto file: {:?}", proto_file);
+            let is_remote = proto_file.to_string_lossy().contains("/remote/");
+            let relative_path = proto_file.strip_prefix(proto_root).unwrap_or(proto_file);
+            let path_str = relative_path.to_string_lossy().to_string();
 
-            // Step 1: Generate basic Swift protobuf types
-            let mut cmd = StdCommand::new("protoc");
-            cmd.arg(format!("--proto_path={}", proto_root.display()))
-                .arg(format!("--swift_out={}", context.output.display()))
-                .arg("--swift_opt=Visibility=Public")
-                .arg(proto_file);
-
-            debug!("Executing protoc (swift): {:?}", cmd);
-            let output = cmd.output().map_err(|e| {
-                ActrCliError::command_error(format!("Failed to execute protoc (swift): {e}"))
-            })?;
-
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(ActrCliError::command_error(format!(
-                    "protoc (swift) execution failed: {stderr}"
-                )));
-            }
-
-            // Step 2: Generate Actor framework code using protoc-gen-actrframework-swift
-            let mut cmd = StdCommand::new("protoc");
-            cmd.arg(format!("--proto_path={}", proto_root.display()))
-                // .arg(format!(
-                //     "--plugin=protoc-gen-actrframework-swift={}",
-                //     plugin_path.display()
-                // ))
-                .arg(format!(
-                    "--actrframework-swift_opt=Visibility=Public,manufacturer={}",
-                    context.config.package.actr_type.manufacturer
-                ))
-                .arg(format!(
-                    "--actrframework-swift_out={}",
-                    context.output.display()
-                ))
-                .arg(proto_file);
-
-            debug!("Executing protoc (actrframework-swift): {:?}", cmd);
-            let output = cmd.output().map_err(|e| {
-                ActrCliError::command_error(format!(
-                    "Failed to execute protoc (actrframework-swift): {e}"
-                ))
-            })?;
-
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(ActrCliError::command_error(format!(
-                    "protoc (actrframework-swift) execution failed: {stderr}"
-                )));
+            if is_remote {
+                remote_paths.push(path_str);
+            } else {
+                local_paths.push(path_str);
             }
         }
 
-        // Collect generated files
-        if let Ok(entries) = std::fs::read_dir(&context.output) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_file() && path.extension().is_some_and(|ext| ext == "swift") {
-                    generated_files.push(path);
-                }
+        // 2. Build the unified options string
+        let mut options = format!(
+            "Visibility=Public,manufacturer={}",
+            context.config.package.actr_type.manufacturer
+        );
+
+        if !remote_paths.is_empty() {
+            options.push_str(&format!(",RemoteFiles={}", remote_paths.join(":")));
+        }
+
+        if !local_paths.is_empty() {
+            options.push_str(&format!(",LocalFiles={}", local_paths.join(":")));
+            // Keep LocalFile for backward compatibility with older plugin versions
+            options.push_str(&format!(",LocalFile={}", local_paths[0]));
+        }
+
+        // Step 1: Generate basic Swift protobuf types for all files at once
+        let mut cmd = StdCommand::new("protoc");
+        cmd.arg(format!("--proto_path={}", proto_root.display()))
+            .arg(format!("--swift_out={}", context.output.display()))
+            .arg("--swift_opt=Visibility=Public");
+
+        for proto_file in &context.proto_files {
+            cmd.arg(proto_file);
+        }
+
+        debug!("Executing protoc (swift): {:?}", cmd);
+        let output = cmd.output().map_err(|e| {
+            ActrCliError::command_error(format!("Failed to execute protoc (swift): {e}"))
+        })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(ActrCliError::command_error(format!(
+                "protoc (swift) execution failed: {stderr}"
+            )));
+        }
+
+        // Step 2: Generate Actor framework code using protoc-gen-actrframework-swift for all files at once
+        let mut cmd = StdCommand::new("protoc");
+        cmd.arg(format!("--proto_path={}", proto_root.display()))
+            .arg(format!("--actrframework-swift_opt={}", options))
+            .arg(format!(
+                "--actrframework-swift_out={}",
+                context.output.display()
+            ));
+
+        for proto_file in &context.proto_files {
+            cmd.arg(proto_file);
+        }
+
+        debug!("Executing protoc (actrframework-swift): {:?}", cmd);
+        let output = cmd.output().map_err(|e| {
+            ActrCliError::command_error(format!(
+                "Failed to execute protoc (actrframework-swift): {e}"
+            ))
+        })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(ActrCliError::command_error(format!(
+                "protoc (actrframework-swift) execution failed: {stderr}"
+            )));
+        }
+
+        // Flatten directory structure: move all swift files from subdirectories to output root
+        self.flatten_output_directory(&context.output)?;
+
+        // Collect generated files (recursively)
+        for entry in walkdir::WalkDir::new(&context.output)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+            if path.is_file() && path.extension().is_some_and(|ext| ext == "swift") {
+                generated_files.push(path.to_path_buf());
             }
         }
 
@@ -122,13 +154,41 @@ impl LanguageGenerator for SwiftGenerator {
         info!("📝 Generating Swift user code scaffold...");
         let mut scaffold_files = Vec::new();
 
-        let service_name = context
-            .proto_files
-            .first()
-            .and_then(|f| f.file_stem())
-            .and_then(|s| s.to_str())
-            .map(to_pascal_case)
-            .unwrap_or_else(|| "UnknownService".to_string());
+        // 1. Parse local services to get methods for handler implementation
+        let services = self.parse_local_services(context);
+
+        // 2. Determine service name for scaffolding
+        let service_name = if let Some(service) = services.first() {
+            service.name.clone()
+        } else if let Some(dep) = context.config.dependencies.first() {
+            let type_name = dep
+                .actr_type
+                .as_ref()
+                .map(|t| t.name.clone())
+                .unwrap_or_else(|| dep.name.clone());
+
+            debug!("Using service name from dependencies: {}", type_name);
+            type_name
+        } else {
+            // Fallback to the first proto file name
+            let guessed_name = context
+                .proto_files
+                .first()
+                .and_then(|f| f.file_stem())
+                .and_then(|s| s.to_str())
+                .map(to_pascal_case)
+                .map(|s| format!("{}Service", s))
+                .unwrap_or_else(|| "UnknownService".to_string());
+
+            debug!("Fallback to guessed service name: {}", guessed_name);
+            guessed_name
+        };
+
+        let workload_name = if let Some(service) = services.first() {
+            format!("{}Workload", service.name)
+        } else {
+            format!("{}Workload", to_pascal_case(&context.config.package.name))
+        };
 
         let user_file_path = context
             .output
@@ -157,7 +217,9 @@ impl LanguageGenerator for SwiftGenerator {
 
         let scaffold_content = self.generate_scaffold_content(
             &context.config.package.actr_type.manufacturer,
-            &format!("{}Service", service_name),
+            &service_name,
+            &workload_name,
+            &services,
         )?;
 
         std::fs::write(&user_file_path, scaffold_content).map_err(|e| {
@@ -266,6 +328,81 @@ impl SwiftGenerator {
         ))
     }
 
+    /// Flattens the output directory structure by moving all swift files from
+    /// subdirectories to the root of the output directory.
+    fn flatten_output_directory(&self, output_dir: &Path) -> Result<()> {
+        let mut files_to_move = Vec::new();
+
+        // Collect all swift files from subdirectories
+        for entry in WalkDir::new(output_dir)
+            .min_depth(2) // Skip the root directory itself
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+            if path.is_file() && path.extension().is_some_and(|ext| ext == "swift") {
+                files_to_move.push(path.to_path_buf());
+            }
+        }
+
+        // Move each file to the output root, overwriting existing files
+        for src_path in files_to_move {
+            let file_name = src_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .ok_or_else(|| {
+                    ActrCliError::config_error("Failed to get filename from path".to_string())
+                })?;
+
+            let mut dst_path = output_dir.to_path_buf();
+            dst_path.push(file_name);
+
+            // Overwrite existing files if they are not the same as src_path
+            if dst_path.exists() && dst_path != src_path {
+                debug!("Overwriting existing file: {:?}", dst_path);
+                std::fs::remove_file(&dst_path).map_err(|e| {
+                    ActrCliError::config_error(format!(
+                        "Failed to remove existing file {:?}: {}",
+                        dst_path, e
+                    ))
+                })?;
+            }
+
+            std::fs::rename(&src_path, &dst_path).map_err(|e| {
+                ActrCliError::config_error(format!(
+                    "Failed to move {} to {}: {}",
+                    src_path.display(),
+                    dst_path.display(),
+                    e
+                ))
+            })?;
+        }
+
+        // Remove empty subdirectories
+        self.remove_empty_subdirectories(output_dir)?;
+
+        Ok(())
+    }
+
+    /// Recursively removes empty subdirectories from the output directory.
+    #[allow(clippy::only_used_in_recursion)]
+    fn remove_empty_subdirectories(&self, dir: &Path) -> Result<()> {
+        if dir.is_dir() {
+            for entry in std::fs::read_dir(dir)? {
+                let entry = entry?;
+                let path = entry.path();
+                if path.is_dir() {
+                    self.remove_empty_subdirectories(&path)?;
+                    // Only remove if still empty after processing children
+                    if path.read_dir()?.next().is_none() {
+                        std::fs::remove_dir(&path)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn find_xcodegen_root(&self, context: &GenContext) -> Result<PathBuf> {
         let mut candidates = Vec::new();
         if let Ok(cwd) = std::env::current_dir() {
@@ -299,19 +436,179 @@ impl SwiftGenerator {
             "project.yml not found; cannot run xcodegen generate",
         ))
     }
+}
 
-    fn generate_scaffold_content(&self, manufacturer: &str, service_name: &str) -> Result<String> {
+#[derive(Serialize, Clone)]
+struct ProtoService {
+    name: String,
+    package: String,
+    swift_package_prefix: String,
+    methods: Vec<ProtoMethod>,
+}
+
+#[derive(Serialize, Clone)]
+struct ProtoMethod {
+    name: String,
+    swift_name: String,
+    input_type: String,
+    output_type: String,
+}
+
+impl SwiftGenerator {
+    fn parse_local_services(&self, context: &GenContext) -> Vec<ProtoService> {
+        let mut services = Vec::new();
+
+        for proto_file_path in &context.proto_files {
+            // Only look at local files
+            if proto_file_path.to_string_lossy().contains("/remote/") {
+                continue;
+            }
+
+            if let Ok(content) = std::fs::read_to_string(proto_file_path) {
+                let mut current_package = String::new();
+                let mut current_service: Option<ProtoService> = None;
+
+                for line in content.lines() {
+                    let line = line.trim();
+
+                    // Parse package
+                    if line.starts_with("package ") {
+                        current_package = line
+                            .trim_start_matches("package ")
+                            .trim_end_matches(';')
+                            .trim()
+                            .to_string();
+                        continue;
+                    }
+
+                    // Parse service start
+                    if line.starts_with("service ") {
+                        let service_name = line
+                            .trim_start_matches("service ")
+                            .split_whitespace()
+                            .next()
+                            .unwrap_or("")
+                            .trim_end_matches('{')
+                            .trim()
+                            .to_string();
+
+                        if !service_name.is_empty() {
+                            let swift_package_prefix = if current_package.is_empty() {
+                                String::new()
+                            } else {
+                                // Convert echo_app to EchoApp_
+                                let parts: Vec<String> = current_package
+                                    .split('_')
+                                    .map(|s| {
+                                        let mut c = s.chars();
+                                        match c.next() {
+                                            None => String::new(),
+                                            Some(f) => {
+                                                f.to_uppercase().collect::<String>() + c.as_str()
+                                            }
+                                        }
+                                    })
+                                    .collect();
+                                parts.join("") + "_"
+                            };
+
+                            current_service = Some(ProtoService {
+                                name: service_name,
+                                package: current_package.clone(),
+                                swift_package_prefix,
+                                methods: Vec::new(),
+                            });
+                        }
+                        continue;
+                    }
+
+                    // Parse rpc method
+                    if let Some(ref mut service) = current_service {
+                        if line.starts_with("rpc ") {
+                            // rpc RelayMessage(RelayMessageRequest) returns (RelayMessageResponse);
+                            let line = line.trim_start_matches("rpc ").trim();
+                            if let Some(name_end) = line.find('(') {
+                                let method_name = line[..name_end].trim().to_string();
+
+                                // swift_name: RelayMessage -> relayMessage
+                                let mut chars = method_name.chars();
+                                let swift_name = match chars.next() {
+                                    None => String::new(),
+                                    Some(f) => {
+                                        f.to_lowercase().collect::<String>() + chars.as_str()
+                                    }
+                                };
+
+                                let rest = &line[name_end + 1..];
+                                if let Some(input_end) = rest.find(')') {
+                                    let input_type = rest[..input_end].trim().to_string();
+
+                                    if let Some(returns_pos) = rest.find("returns") {
+                                        let rest = &rest[returns_pos + 7..];
+                                        if let Some(output_start) = rest.find('(')
+                                            && let Some(output_end) = rest.find(')')
+                                        {
+                                            let output_type = rest[output_start + 1..output_end]
+                                                .trim()
+                                                .to_string();
+
+                                            service.methods.push(ProtoMethod {
+                                                name: method_name,
+                                                swift_name,
+                                                input_type: format!(
+                                                    "{}{}",
+                                                    service.swift_package_prefix, input_type
+                                                ),
+                                                output_type: format!(
+                                                    "{}{}",
+                                                    service.swift_package_prefix, output_type
+                                                ),
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if line.contains('}')
+                            && let Some(s) = current_service.take()
+                        {
+                            services.push(s);
+                        }
+                    }
+                }
+            }
+        }
+        services
+    }
+
+    fn generate_scaffold_content(
+        &self,
+        manufacturer: &str,
+        service_name: &str,
+        workload_name: &str,
+        services: &[ProtoService],
+    ) -> Result<String> {
         #[derive(Serialize)]
         struct SwiftScaffoldContext {
             #[serde(rename = "MANUFACTURER")]
             manufacturer: String,
             #[serde(rename = "SERVICE_NAME")]
             service_name: String,
+            #[serde(rename = "WORKLOAD_NAME")]
+            workload_name: String,
+            #[serde(rename = "SERVICES")]
+            services: Vec<ProtoService>,
+            #[serde(rename = "HAS_SERVICES")]
+            has_services: bool,
         }
 
         let context = SwiftScaffoldContext {
             manufacturer: manufacturer.to_string(),
             service_name: service_name.to_string(),
+            workload_name: workload_name.to_string(),
+            services: services.to_vec(),
+            has_services: !services.is_empty(),
         };
 
         let mut handlebars = Handlebars::new();

@@ -11,7 +11,7 @@ import kotlinx.coroutines.withContext
  *
  * 1. Generate the Echo client code:
  *    ```
- *    actr gen -l kotlin -i protos/echo.proto -o app/src/main/java/{{PACKAGE_PATH}}/generated
+ *    actr gen -l kotlin -i protos/remote/echo-service/echo.proto -o app/src/main/java/{{PACKAGE_PATH}}/generated
  *    ```
  *
  * 2. Copy the actr-kotlin library to your project:
@@ -78,7 +78,7 @@ class ActrService(private val context: Context) {
     companion object {
         private const val STUB_ERROR_MESSAGE = 
             "ActrService is not generated. Run:\n" +
-            "actr gen -l kotlin -i protos/echo.proto -o app/src/main/java/{{PACKAGE_PATH}}/generated"
+            "actr gen -l kotlin -i protos/remote/echo-service/echo.proto -o app/src/main/java/{{PACKAGE_PATH}}/generated"
     }
 }
 

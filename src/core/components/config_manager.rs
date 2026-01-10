@@ -1,12 +1,13 @@
-use actr_config::ConfigParser;
+use actr_config::{Config, ConfigParser};
+use actr_protocol::ActrTypeExt;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use tokio::fs;
-use toml::map::Map;
+use toml_edit::{DocumentMut, InlineTable, Item, Table, Value};
 
-use crate::core::{Config, ConfigBackup, ConfigManager, ConfigValidation, DependencySpec};
+use crate::core::{ConfigBackup, ConfigManager, ConfigValidation, DependencySpec};
 
 pub struct TomlConfigManager {
     config_path: PathBuf,
@@ -33,33 +34,6 @@ impl TomlConfigManager {
         fs::write(path, contents)
             .await
             .with_context(|| format!("Failed to write config file: {}", path.display()))
-    }
-
-    fn dependency_to_value(spec: &DependencySpec) -> toml::Value {
-        let mut table = Map::new();
-        if let Some(fingerprint) = &spec.fingerprint {
-            if let Some(actr_type) = Self::actr_type_from_uri(&spec.uri) {
-                table.insert("actr_type".to_string(), toml::Value::String(actr_type));
-            }
-            table.insert(
-                "fingerprint".to_string(),
-                toml::Value::String(fingerprint.clone()),
-            );
-        }
-        toml::Value::Table(table)
-    }
-
-    fn actr_type_from_uri(uri: &str) -> Option<String> {
-        let without_scheme = uri.strip_prefix("actr://")?;
-        let name_end = without_scheme
-            .find(|c| ['/', '?'].contains(&c))
-            .unwrap_or(without_scheme.len());
-        let name = without_scheme[..name_end].trim();
-        if name.is_empty() {
-            None
-        } else {
-            Some(name.to_string())
-        }
     }
 
     fn build_backup_path(&self) -> Result<PathBuf> {
@@ -97,23 +71,41 @@ impl ConfigManager for TomlConfigManager {
 
     async fn update_dependency(&self, spec: &DependencySpec) -> Result<()> {
         let contents = self.read_config_string(&self.config_path).await?;
-        let mut value: toml::Value = toml::from_str(&contents)
+        let mut doc = contents
+            .parse::<DocumentMut>()
             .with_context(|| format!("Failed to parse config: {}", self.config_path.display()))?;
 
-        let root = value
-            .as_table_mut()
-            .ok_or_else(|| anyhow::anyhow!("Config root must be a table"))?;
-        let deps_value = root
-            .entry("dependencies".to_string())
-            .or_insert_with(|| toml::Value::Table(Map::new()));
-        let deps_table = deps_value
-            .as_table_mut()
-            .ok_or_else(|| anyhow::anyhow!("dependencies must be a table"))?;
+        if !doc.contains_key("dependencies") {
+            doc["dependencies"] = Item::Table(Table::new());
+        }
 
-        deps_table.insert(spec.name.clone(), Self::dependency_to_value(spec));
+        let mut dep_table = InlineTable::new();
 
-        let updated = toml::to_string_pretty(&value).context("Failed to serialize config")?;
-        self.write_config_string(&self.config_path, &updated).await
+        // Add name attribute if it differs from alias
+        if spec.name != spec.alias {
+            dep_table.insert("name", Value::from(spec.name.clone()));
+        }
+
+        // Add actr_type attribute
+        if let Some(actr_type) = &spec.actr_type {
+            let actr_type_repr = actr_type.to_string_repr();
+            if actr_type_repr.is_empty() {
+                return Err(anyhow::anyhow!(
+                    "Actr type is required for dependency: {}",
+                    spec.alias
+                ));
+            }
+            dep_table.insert("actr_type", Value::from(actr_type_repr));
+        }
+
+        if let Some(fingerprint) = &spec.fingerprint {
+            dep_table.insert("fingerprint", Value::from(fingerprint.as_str()));
+        }
+
+        doc["dependencies"][&spec.alias] = Item::Value(Value::InlineTable(dep_table));
+
+        self.write_config_string(&self.config_path, &doc.to_string())
+            .await
     }
 
     async fn validate_config(&self) -> Result<ConfigValidation> {
@@ -140,7 +132,9 @@ impl ConfigManager for TomlConfigManager {
             if dependency.alias.trim().is_empty() {
                 errors.push("dependency alias is required".to_string());
             }
-            if dependency.actr_type.name.trim().is_empty() {
+            if let Some(actr_type) = &dependency.actr_type
+                && actr_type.name.trim().is_empty()
+            {
                 errors.push(format!(
                     "dependency {} has an empty actr_type name",
                     dependency.alias
