@@ -13,10 +13,14 @@ name = "actr"
 path = "src/main.rs"
 
 [patch.crates-io]
-actr-protocol = { path = "../actr/crates/protocol" }
-actr-config = { path = "../actr/crates/config" }
-actr-version = { path = "../actr/crates/version" }
-actr-framework-protoc-codegen = { path = "../actr/crates/framework-protoc-codegen" }
+# actr-protocol = { path = "../actr/crates/protocol" }
+# actr-config = { path = "../actr/crates/config" }
+# actr-version = { path = "../actr/crates/version" }
+# actr-framework-protoc-codegen = { path = "../actr/crates/framework-protoc-codegen" }
+actr-protocol = { git = "https://github.com/actor-rtc/actr.git", rev = "09757bb556045d2b85edf4812c12db2afd3d2dd5" }
+actr-config = { git = "https://github.com/actor-rtc/actr.git", rev = "09757bb556045d2b85edf4812c12db2afd3d2dd5" }
+actr-version = { git = "https://github.com/actor-rtc/actr.git", rev = "09757bb556045d2b85edf4812c12db2afd3d2dd5" }
+actr-framework-protoc-codegen = { git = "https://github.com/actor-rtc/actr.git", rev = "09757bb556045d2b85edf4812c12db2afd3d2dd5" }
 
 [dependencies]
 # Actor-RTC crates - only what CLI actually needs

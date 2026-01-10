@@ -50,6 +50,7 @@ dependencies = [
 [[package]]
 name = "actr-config"
 version = "0.1.7"
+source = "git+https://github.com/actor-rtc/actr.git?rev=09757bb556045d2b85edf4812c12db2afd3d2dd5#09757bb556045d2b85edf4812c12db2afd3d2dd5"
 dependencies = [
  "actr-protocol",
  "actr-version",
@@ -63,6 +64,7 @@ dependencies = [
 [[package]]
 name = "actr-framework"
 version = "0.1.5"
+source = "git+https://github.com/actor-rtc/actr.git?rev=09757bb556045d2b85edf4812c12db2afd3d2dd5#09757bb556045d2b85edf4812c12db2afd3d2dd5"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -77,6 +79,7 @@ dependencies = [
 [[package]]
 name = "actr-framework-protoc-codegen"
 version = "0.1.6"
+source = "git+https://github.com/actor-rtc/actr.git?rev=09757bb556045d2b85edf4812c12db2afd3d2dd5#09757bb556045d2b85edf4812c12db2afd3d2dd5"
 dependencies = [
  "actr-framework",
  "actr-protocol",
@@ -94,6 +97,7 @@ dependencies = [
 [[package]]
 name = "actr-protocol"
 version = "0.1.6"
+source = "git+https://github.com/actor-rtc/actr.git?rev=09757bb556045d2b85edf4812c12db2afd3d2dd5#09757bb556045d2b85edf4812c12db2afd3d2dd5"
 dependencies = [
  "anyhow",
  "base122-rs",
@@ -114,6 +118,7 @@ dependencies = [
 [[package]]
 name = "actr-version"
 version = "0.1.4"
+source = "git+https://github.com/actor-rtc/actr.git?rev=09757bb556045d2b85edf4812c12db2afd3d2dd5#09757bb556045d2b85edf4812c12db2afd3d2dd5"
 dependencies = [
  "actr-protocol",
  "anyhow",
