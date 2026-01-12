@@ -207,6 +207,15 @@ async fn execute_command(
         Commands::Discovery(cmd) => {
             let command = DiscoveryCommand::from_args(cmd);
 
+            // TODO: (Option B) In the future, if a default public signaling server is available,
+            // we should allow discovery to run without a local Actr.toml by using a default config.
+            // For now (Option A), we require a project context to get the signaling URL.
+            if !std::path::Path::new("Actr.toml").exists() {
+                return Err(anyhow::anyhow!(
+                    "No Actr.toml found in current directory.\n💡 Hint: Run 'actr init' to initialize a new project first."
+                ));
+            }
+
             // 验证所需组件
             {
                 let container = context.container.lock().unwrap();

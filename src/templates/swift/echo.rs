@@ -3,7 +3,7 @@ use crate::templates::ProjectTemplate;
 use std::collections::HashMap;
 use std::path::Path;
 
-pub fn load(files: &mut HashMap<String, String>, service_name: &str) -> Result<()> {
+pub fn load(files: &mut HashMap<String, String>) -> Result<()> {
     let fixtures_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures");
 
     // Load template files from disk with placeholders in path
@@ -48,17 +48,7 @@ pub fn load(files: &mut HashMap<String, String>, service_name: &str) -> Result<(
         "{{PROJECT_NAME_PASCAL}}/ActrService+Echo.swift",
     )?;
     // Load fixture files (no placeholders, fixed paths)
-    // Use handlebars to render the service_name in the path
-    let proto_path = format!("protos/remote/{}/echo.proto", service_name);
-    ProjectTemplate::load_file(
-        &fixtures_root.join("echo-service/echo.proto"),
-        files,
-        &proto_path,
-    )?;
-    files.insert(
-        "protos/client.proto".to_string(),
-        "syntax = \"proto3\";\n\npackage {{PROJECT_NAME_SNAKE}};\n".to_string(),
-    );
+    // Note: proto files are no longer created during init, they will be pulled via actr install
     ProjectTemplate::load_file(
         &fixtures_root.join("swift/Assets.xcassets/Contents.json"),
         files,

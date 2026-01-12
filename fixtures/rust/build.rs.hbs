@@ -1,14 +1,20 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let proto_files = ["protos/remote/echo-service/echo.proto"];
+    // Note: Proto files should be installed via 'actr install' first
+    // Update this array with the actual proto files after running 'actr install'
+    let proto_files = [
+        // Example: "protos/remote/echo-service/echo.proto",
+    ];
 
-    tonic_build::configure()
-        .build_server(false)
-        .build_client(true)
-        .compile(&proto_files, &["protos/"])?;
+    if !proto_files.is_empty() {
+        tonic_build::configure()
+            .build_server(false)
+            .build_client(true)
+            .compile(&proto_files, &["protos/"])?;
 
-    // Re-run if proto files change
-    for proto_file in &proto_files {
-        println!("cargo:rerun-if-changed={}", proto_file);
+        // Re-run if proto files change
+        for proto_file in &proto_files {
+            println!("cargo:rerun-if-changed={}", proto_file);
+        }
     }
 
     Ok(())

@@ -3,14 +3,16 @@ use super::{InitContext, ProjectInitializer};
 use crate::commands::SupportedLanguage;
 use crate::error::{ActrCliError, Result};
 use crate::template::{ProjectTemplate, TemplateContext};
+use async_trait::async_trait;
 use std::path::Path;
 use std::process::Command;
 use tracing::info;
 
 pub struct PythonInitializer;
 
+#[async_trait]
 impl ProjectInitializer for PythonInitializer {
-    fn generate_project_structure(&self, context: &InitContext) -> Result<()> {
+    async fn generate_project_structure(&self, context: &InitContext) -> Result<()> {
         let template = ProjectTemplate::new(context.template, SupportedLanguage::Python);
         let service_name = context.template.to_service_name();
         let template_context =
@@ -28,6 +30,8 @@ impl ProjectInitializer for PythonInitializer {
         if !context.is_current_dir {
             info!("  cd {}", context.project_dir.display());
         }
+        info!("  actr install  # Install remote protobuf dependencies from Actr.toml");
+        info!("  actr gen -l python -i proto/remote/{{service-name}}/{{proto-file}} -o generated");
         info!("  cd server");
         info!("  python server.py --actr-toml Actr.toml");
         info!("  cd ../client");

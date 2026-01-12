@@ -1,13 +1,15 @@
 use super::{InitContext, ProjectInitializer};
 use crate::error::{ActrCliError, Result};
 use crate::templates::ProjectTemplateName;
+use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use tracing::info;
 
 pub struct KotlinInitializer;
 
+#[async_trait]
 impl ProjectInitializer for KotlinInitializer {
-    fn generate_project_structure(&self, context: &InitContext) -> Result<()> {
+    async fn generate_project_structure(&self, context: &InitContext) -> Result<()> {
         if context.template != ProjectTemplateName::Echo {
             return Err(ActrCliError::InvalidProject(format!(
                 "Unknown template: {}",
@@ -15,8 +17,7 @@ impl ProjectInitializer for KotlinInitializer {
             )));
         }
 
-        // Map template name to remote service name
-        let service_name = context.template.to_service_name();
+        // Note: proto files are no longer created during init, they will be pulled via actr install
 
         let project_name_pascal = to_pascal_case(&context.project_name);
         let package_name = to_package_name(&context.project_name);
@@ -51,9 +52,7 @@ impl ProjectInitializer for KotlinInitializer {
         let app_dir = context.project_dir.join("app");
         let java_dir = app_dir.join("src/main/java").join(&package_path);
 
-        // Proto path with service_name variable
-        let proto_path = format!("protos/remote/{}/echo.proto", service_name);
-        let proto_app_path = format!("src/main/proto/remote/{}/echo.proto", service_name);
+        // Note: proto files are no longer created during init, they will be pulled via actr install
 
         // Root level files
         let files = vec![
@@ -77,15 +76,7 @@ impl ProjectInitializer for KotlinInitializer {
                 fixtures_root.join("kotlin/gitignore"),
                 context.project_dir.join(".gitignore"),
             ),
-            (
-                fixtures_root.join("echo-service/echo.proto"),
-                context.project_dir.join(&proto_path),
-            ),
-            // Also copy proto to app/src/main/proto for Gradle protobuf plugin
-            (
-                fixtures_root.join("echo-service/echo.proto"),
-                app_dir.join(&proto_app_path),
-            ),
+            // Note: proto files are no longer created during init, they will be pulled via actr install
             // App module files
             (
                 fixtures_root.join("kotlin/app/build.gradle.kts"),
@@ -152,46 +143,8 @@ impl ProjectInitializer for KotlinInitializer {
 
         info!("📁 Created Android project structure");
 
-        // Generate framework code using actr gen
-        info!("🔧 Generating framework code...");
-        let generated_dir = java_dir.join("generated");
-        std::fs::create_dir_all(&generated_dir)?;
-
-        let proto_file = context.project_dir.join(&proto_path);
-        let config_file = context.project_dir.join("Actr.toml");
-        if proto_file.exists() {
-            // Run actr gen command to generate Handler/Dispatcher and scaffold code
-            let output = std::process::Command::new("actr")
-                .arg("gen")
-                .arg("-l")
-                .arg("kotlin")
-                .arg("-i")
-                .arg(&proto_file)
-                .arg("-o")
-                .arg(&generated_dir)
-                .arg("--config")
-                .arg(&config_file)
-                .output();
-
-            match output {
-                Ok(result) => {
-                    if result.status.success() {
-                        info!("✅ Framework code generated successfully");
-                    } else {
-                        let stderr = String::from_utf8_lossy(&result.stderr);
-                        tracing::warn!("⚠️  Framework code generation had warnings: {}", stderr);
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "⚠️  Could not run 'actr gen'. Please run manually: actr gen -l kotlin -i {} -o app/src/main/java/{}/generated. Error: {}",
-                        proto_path,
-                        package_path,
-                        e
-                    );
-                }
-            }
-        }
+        // Note: Framework code generation is skipped during init
+        // Users should run 'actr install' first to get proto files, then 'actr gen'
 
         Ok(())
     }
@@ -205,6 +158,11 @@ impl ProjectInitializer for KotlinInitializer {
         if !context.is_current_dir {
             info!("  cd {}", context.project_dir.display());
         }
+        info!("  actr install  # Install remote protobuf dependencies from Actr.toml");
+        info!(
+            "  actr gen -l kotlin -i protos/remote/{{service-name}}/{{proto-file}} -o app/src/main/java/{}/generated",
+            package_path
+        );
         info!("  ./gradlew assembleDebug");
         info!("  # Install APK: adb install app/build/outputs/apk/debug/app-debug.apk");
         info!("");

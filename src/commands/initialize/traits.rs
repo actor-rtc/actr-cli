@@ -1,4 +1,5 @@
 use crate::{error::Result, template::ProjectTemplateName};
+use async_trait::async_trait;
 use std::path::PathBuf;
 
 /// Context for non-Rust project initialization.
@@ -12,7 +13,8 @@ pub struct InitContext {
 }
 
 /// Interface for language-specific project initialization.
+#[async_trait]
 pub trait ProjectInitializer: Send + Sync {
-    fn generate_project_structure(&self, context: &InitContext) -> Result<()>;
+    async fn generate_project_structure(&self, context: &InitContext) -> Result<()>;
     fn print_next_steps(&self, context: &InitContext);
 }

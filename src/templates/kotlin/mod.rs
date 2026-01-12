@@ -5,11 +5,7 @@ use std::collections::HashMap;
 pub struct KotlinTemplate;
 
 impl LangTemplate for KotlinTemplate {
-    fn load_files(
-        &self,
-        _template_name: ProjectTemplateName,
-        _service_name: &str,
-    ) -> Result<HashMap<String, String>> {
+    fn load_files(&self, _template_name: ProjectTemplateName) -> Result<HashMap<String, String>> {
         Err(ActrCliError::Unsupported(
             "Kotlin project initialization is not implemented yet".to_string(),
         ))

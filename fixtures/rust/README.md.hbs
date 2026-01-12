@@ -2,6 +2,14 @@
 
 An Actor-RTC service implementation.
 
+## Setup
+
+First, install service dependencies to get proto files:
+
+```bash
+actr install
+```
+
 ## Building
 
 ```bash
@@ -18,5 +26,5 @@ actr run
 
 This project uses the Actor-RTC framework. The main logic is implemented in `src/lib.rs`.
 
-The service definition is in `protos/remote/echo-service/echo.proto`, and the implementation is in the `{{PROJECT_NAME_PASCAL}}Actor` struct.
+After running `actr install`, the service definition proto files will be in `protos/remote/`, and the implementation is in the `{{PROJECT_NAME_PASCAL}}Actor` struct.
 

@@ -5,7 +5,10 @@ pub mod python;
 pub mod rust;
 pub mod swift;
 
-pub use crate::commands::SupportedLanguage;
+use self::kotlin::KotlinTemplate;
+use self::python::PythonTemplate;
+use self::rust::RustTemplate;
+use self::swift::SwiftTemplate;
 use crate::error::Result;
 use crate::utils::{to_pascal_case, to_snake_case};
 use clap::ValueEnum;
@@ -14,10 +17,10 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::path::Path;
 
-use self::kotlin::KotlinTemplate;
-use self::python::PythonTemplate;
-use self::rust::RustTemplate;
-use self::swift::SwiftTemplate;
+pub use crate::commands::SupportedLanguage;
+
+pub const DEFAULT_ACTR_SWIFT_VERSION: &str = "0.1.10";
+pub const DEFAULT_ACTR_PROTOCOLS_VERSION: &str = "0.1.0";
 
 /// Project template options
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum, Serialize)]
@@ -59,6 +62,12 @@ pub struct TemplateContext {
     pub manufacturer: String,
     #[serde(rename = "SERVICE_NAME")]
     pub service_name: String,
+    #[serde(rename = "ACTR_SWIFT_VERSION")]
+    pub actr_swift_version: String,
+    #[serde(rename = "ACTR_PROTOCOLS_VERSION")]
+    pub actr_protocols_version: String,
+    #[serde(rename = "ACTR_LOCAL_PATH")]
+    pub actr_local_path: Option<String>,
 }
 
 impl TemplateContext {
@@ -70,16 +79,40 @@ impl TemplateContext {
             signaling_url: signaling_url.to_string(),
             manufacturer: "unknown".to_string(),
             service_name: service_name.to_string(),
+            actr_swift_version: DEFAULT_ACTR_SWIFT_VERSION.to_string(),
+            actr_protocols_version: DEFAULT_ACTR_PROTOCOLS_VERSION.to_string(),
+            actr_local_path: std::env::var("ACTR_SWIFT_LOCAL_PATH").ok(),
         }
+    }
+
+    pub async fn new_with_versions(
+        project_name: &str,
+        signaling_url: &str,
+        service_name: &str,
+    ) -> Self {
+        let mut ctx = Self::new(project_name, signaling_url, service_name);
+
+        // Fetch latest versions in parallel with 5s timeout
+        let swift_task = crate::utils::fetch_latest_git_tag(
+            "https://github.com/actor-rtc/actr-swift",
+            &ctx.actr_swift_version,
+        );
+        let protocols_task = crate::utils::fetch_latest_git_tag(
+            "https://github.com/actor-rtc/actr-protocols-swift",
+            &ctx.actr_protocols_version,
+        );
+
+        let (swift_v, protocols_v) = tokio::join!(swift_task, protocols_task);
+
+        ctx.actr_swift_version = swift_v;
+        ctx.actr_protocols_version = protocols_v;
+
+        ctx
     }
 }
 
 pub trait LangTemplate: Send + Sync {
-    fn load_files(
-        &self,
-        template_name: ProjectTemplateName,
-        service_name: &str,
-    ) -> Result<HashMap<String, String>>;
+    fn load_files(&self, template_name: ProjectTemplateName) -> Result<HashMap<String, String>>;
 }
 
 pub struct ProjectTemplate {
@@ -113,9 +146,7 @@ impl ProjectTemplate {
     }
 
     pub fn generate(&self, project_path: &Path, context: &TemplateContext) -> Result<()> {
-        let files = self
-            .lang_template
-            .load_files(self.name, &context.service_name)?;
+        let files = self.lang_template.load_files(self.name)?;
         let handlebars = Handlebars::new();
 
         for (file_path, content) in &files {
@@ -149,6 +180,8 @@ mod tests {
         assert_eq!(ctx.project_name_pascal, "MyChatService");
         assert_eq!(ctx.signaling_url, "ws://localhost:8080");
         assert_eq!(ctx.service_name, "echo-service");
+        assert_eq!(ctx.actr_swift_version, DEFAULT_ACTR_SWIFT_VERSION);
+        assert_eq!(ctx.actr_protocols_version, DEFAULT_ACTR_PROTOCOLS_VERSION);
     }
 
     #[test]
@@ -173,13 +206,7 @@ mod tests {
         assert!(temp_dir.path().join("Actr.toml").exists());
         // Verify .gitignore exists
         assert!(temp_dir.path().join(".gitignore").exists());
-        // Verify proto file exists
-        assert!(
-            temp_dir
-                .path()
-                .join("protos/remote/echo-service/echo.proto")
-                .exists()
-        );
+        // Note: proto files are no longer created during init, they will be pulled via actr install
         // Verify app directory exists
         assert!(
             temp_dir
@@ -193,9 +220,7 @@ mod tests {
     #[test]
     fn test_project_template_load_files() {
         let template = ProjectTemplate::new(ProjectTemplateName::Echo, SupportedLanguage::Swift);
-        let result = template
-            .lang_template
-            .load_files(ProjectTemplateName::Echo, "echo-service");
+        let result = template.lang_template.load_files(ProjectTemplateName::Echo);
         assert!(result.is_ok());
     }
 }

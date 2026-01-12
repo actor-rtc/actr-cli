@@ -79,6 +79,11 @@ impl ConfigManager for TomlConfigManager {
             doc["dependencies"] = Item::Table(Table::new());
         }
 
+        // Preserve existing dependency entry if it exists
+        let existing_dep = doc["dependencies"]
+            .get(&spec.alias)
+            .and_then(|item| item.as_inline_table());
+
         let mut dep_table = InlineTable::new();
 
         // Add name attribute if it differs from alias
@@ -86,7 +91,7 @@ impl ConfigManager for TomlConfigManager {
             dep_table.insert("name", Value::from(spec.name.clone()));
         }
 
-        // Add actr_type attribute
+        // Add actr_type attribute - preserve existing if new one is not provided
         if let Some(actr_type) = &spec.actr_type {
             let actr_type_repr = actr_type.to_string_repr();
             if actr_type_repr.is_empty() {
@@ -96,10 +101,21 @@ impl ConfigManager for TomlConfigManager {
                 ));
             }
             dep_table.insert("actr_type", Value::from(actr_type_repr));
+        } else if let Some(existing) = existing_dep {
+            // Preserve existing actr_type if new spec doesn't have one
+            if let Some(existing_actr_type) = existing.get("actr_type") {
+                dep_table.insert("actr_type", existing_actr_type.clone());
+            }
         }
 
+        // Add fingerprint - preserve existing if new one is not provided
         if let Some(fingerprint) = &spec.fingerprint {
             dep_table.insert("fingerprint", Value::from(fingerprint.as_str()));
+        } else if let Some(existing) = existing_dep {
+            // Preserve existing fingerprint if new spec doesn't have one
+            if let Some(existing_fp) = existing.get("fingerprint") {
+                dep_table.insert("fingerprint", existing_fp.clone());
+            }
         }
 
         doc["dependencies"][&spec.alias] = Item::Value(Value::InlineTable(dep_table));

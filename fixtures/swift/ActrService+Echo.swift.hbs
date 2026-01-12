@@ -18,10 +18,7 @@ extension ActrService {
             var request = Echo_EchoRequest()
             request.message = message
 
-            let response: Echo_EchoResponse = try await actr.call(
-                route: "echo.EchoService.Echo",
-                message: request
-            )
+            let response = try await actr.call(request)
 
             return response.reply
         } catch let actrError as ActrError {

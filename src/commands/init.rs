@@ -77,7 +77,7 @@ impl Command for InitCommand {
                 template: self.template,
                 is_current_dir: project_dir == Path::new("."),
             };
-            initialize::execute_initialize(self.language, &context)?;
+            initialize::execute_initialize(self.language, &context).await?;
             info!(
                 "✅ Successfully created Actor-RTC project '{}'",
                 project_name
@@ -97,14 +97,14 @@ impl Command for InitCommand {
             info!("");
             info!("Next steps:");
             info!("  cd {}", project_dir.display());
-            info!("  actr install actr://{{some-service}}/  # Add service dependencies");
+            info!("  actr install  # Install remote protobuf dependencies from Actr.toml");
             info!("  actr gen                             # Generate Actor code");
             info!("  cargo run                            # Start your work");
         } else {
             info!("📁 Project initialized in current directory");
             info!("");
             info!("Next steps:");
-            info!("  actr install actr://{{some-service}}/  # Add service dependencies");
+            info!("  actr install  # Install remote protobuf dependencies from Actr.toml");
             info!("  actr gen                             # Generate Actor code");
             info!("  cargo run                            # Start your work");
         }

@@ -26,9 +26,9 @@ impl InitializerFactory {
     }
 }
 
-pub fn execute_initialize(language: SupportedLanguage, context: &InitContext) -> Result<()> {
+pub async fn execute_initialize(language: SupportedLanguage, context: &InitContext) -> Result<()> {
     let initializer = InitializerFactory::get_initializer(language)?;
-    initializer.generate_project_structure(context)?;
+    initializer.generate_project_structure(context).await?;
     initializer.print_next_steps(context);
     Ok(())
 }

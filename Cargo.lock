@@ -64,7 +64,8 @@ dependencies = [
 [[package]]
 name = "actr-framework"
 version = "0.1.5"
-source = "git+https://github.com/actor-rtc/actr.git?rev=09757bb556045d2b85edf4812c12db2afd3d2dd5#09757bb556045d2b85edf4812c12db2afd3d2dd5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20a1bef848fb393c5545a4be5826d488260fb38bfc4e8fdf714e7359061cbc4b"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -79,7 +80,8 @@ dependencies = [
 [[package]]
 name = "actr-framework-protoc-codegen"
 version = "0.1.6"
-source = "git+https://github.com/actor-rtc/actr.git?rev=09757bb556045d2b85edf4812c12db2afd3d2dd5#09757bb556045d2b85edf4812c12db2afd3d2dd5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6471efd38b8d03adf7a269b80cb7bb718490f7c987249175521e9da90983b2f3"
 dependencies = [
  "actr-framework",
  "actr-protocol",

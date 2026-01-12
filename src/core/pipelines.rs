@@ -424,26 +424,34 @@ impl InstallPipeline {
                 continue;
             }
 
-            // 1. 更新配置文件
-            self.config_manager.update_dependency(spec).await?;
-            result.updated_config = true;
-
-            // 2. 获取服务详情并缓存Proto文件
+            // 1. 获取服务详情（在更新配置之前，确保我们有完整的 actr_type）
             let service_details = self
                 .validation_pipeline
                 .service_discovery
                 .get_service_details(&spec.name)
                 .await?;
 
+            // 2. 构建 resolved_spec，确保包含 actr_type
+            let mut resolved_spec = spec.clone();
+            // 如果 spec 中没有 actr_type，使用从服务详情中获取的
+            if resolved_spec.actr_type.is_none() {
+                resolved_spec.actr_type = Some(service_details.info.actr_type.clone());
+            }
+
+            // 3. 更新配置文件（使用包含 actr_type 的 resolved_spec）
+            self.config_manager
+                .update_dependency(&resolved_spec)
+                .await?;
+            result.updated_config = true;
+
+            // 4. 缓存Proto文件
             self.cache_manager
                 .cache_proto(&spec.name, &service_details.proto_files)
                 .await?;
 
             result.cache_updates += 1;
 
-            // 3. 记录已安装的依赖
-            let mut resolved_spec = spec.clone();
-            resolved_spec.actr_type = Some(service_details.info.actr_type.clone());
+            // 5. 记录已安装的依赖
 
             let resolved_dep = ResolvedDependency {
                 spec: resolved_spec,

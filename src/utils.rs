@@ -3,8 +3,11 @@
 use crate::error::{ActrCliError, Result};
 use std::path::Path;
 use std::process::{Command, Output};
+use std::time::Duration;
 use tokio::process::Command as TokioCommand;
 use tracing::{debug, info, warn};
+
+pub const GIT_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Execute a command and return the output
 #[allow(dead_code)]
@@ -143,6 +146,48 @@ pub fn ensure_dir_exists(path: &Path) -> Result<()> {
         std::fs::create_dir_all(path)?;
     }
     Ok(())
+}
+
+/// Fetch the latest tag from a git repository with a timeout
+pub async fn fetch_latest_git_tag(url: &str, fallback: &str) -> String {
+    debug!("Fetching latest tag for {}", url);
+
+    let fetch_task = async {
+        let output = TokioCommand::new("git")
+            .args(["ls-remote", "--tags", "--sort=v:refname", url])
+            .output()
+            .await;
+
+        match output {
+            Ok(output) if output.status.success() => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                // Parse tags like "refs/tags/v0.1.10" and get the last one
+                stdout
+                    .lines()
+                    .filter_map(|line| {
+                        line.split("refs/tags/")
+                            .nth(1)
+                            .map(|tag| tag.trim().to_string())
+                    })
+                    .rfind(|tag| !tag.contains("^{}")) // Filter out dereferenced tags
+            }
+            _ => None,
+        }
+    };
+
+    match tokio::time::timeout(GIT_FETCH_TIMEOUT, fetch_task).await {
+        Ok(Some(tag)) => {
+            info!("Successfully fetched latest tag for {}: {}", url, tag);
+            tag
+        }
+        _ => {
+            warn!(
+                "Failed to fetch latest tag for {} or timed out, using fallback: {}",
+                url, fallback
+            );
+            fallback.to_string()
+        }
+    }
 }
 
 /// Copy a file, creating parent directories as needed

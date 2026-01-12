@@ -83,53 +83,75 @@ impl LanguageGenerator for SwiftGenerator {
             options.push_str(&format!(",LocalFile={}", local_paths[0]));
         }
 
-        // Step 1: Generate basic Swift protobuf types for all files at once
-        let mut cmd = StdCommand::new("protoc");
-        cmd.arg(format!("--proto_path={}", proto_root.display()))
-            .arg(format!("--swift_out={}", context.output.display()))
-            .arg("--swift_opt=Visibility=Public");
+        // Step 1: Generate basic Swift protobuf types for files that contain messages, enums or extensions
+        let swift_proto_files: Vec<_> = context
+            .proto_files
+            .iter()
+            .filter(|p| self.has_messages_enums_or_extensions(p))
+            .collect();
 
-        for proto_file in &context.proto_files {
-            cmd.arg(proto_file);
+        if !swift_proto_files.is_empty() {
+            let mut cmd = StdCommand::new("protoc");
+            cmd.arg(format!("--proto_path={}", proto_root.display()))
+                .arg(format!("--swift_out={}", context.output.display()))
+                .arg("--swift_opt=Visibility=Public");
+
+            for proto_file in swift_proto_files {
+                cmd.arg(proto_file);
+            }
+
+            debug!("Executing protoc (swift): {:?}", cmd);
+            let output = cmd.output().map_err(|e| {
+                ActrCliError::command_error(format!("Failed to execute protoc (swift): {e}"))
+            })?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(ActrCliError::command_error(format!(
+                    "protoc (swift) execution failed: {stderr}"
+                )));
+            }
         }
 
-        debug!("Executing protoc (swift): {:?}", cmd);
-        let output = cmd.output().map_err(|e| {
-            ActrCliError::command_error(format!("Failed to execute protoc (swift): {e}"))
-        })?;
+        // Step 2: Generate Actor framework code using protoc-gen-actrframework-swift
+        // We filter to files that have either services (to generate Actor/Workload)
+        // or messages (to generate RpcRequest extensions).
+        // For local files, we always include them even if empty to ensure the Workload is generated.
+        let actr_proto_files: Vec<_> = context
+            .proto_files
+            .iter()
+            .filter(|p| {
+                let is_remote = p.to_string_lossy().contains("/remote/");
+                !is_remote || self.has_messages_enums_or_extensions(p) || self.has_services(p)
+            })
+            .collect();
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ActrCliError::command_error(format!(
-                "protoc (swift) execution failed: {stderr}"
-            )));
-        }
+        if !actr_proto_files.is_empty() {
+            let mut cmd = StdCommand::new("protoc");
+            cmd.arg(format!("--proto_path={}", proto_root.display()))
+                .arg(format!("--actrframework-swift_opt={}", options))
+                .arg(format!(
+                    "--actrframework-swift_out={}",
+                    context.output.display()
+                ));
 
-        // Step 2: Generate Actor framework code using protoc-gen-actrframework-swift for all files at once
-        let mut cmd = StdCommand::new("protoc");
-        cmd.arg(format!("--proto_path={}", proto_root.display()))
-            .arg(format!("--actrframework-swift_opt={}", options))
-            .arg(format!(
-                "--actrframework-swift_out={}",
-                context.output.display()
-            ));
+            for proto_file in actr_proto_files {
+                cmd.arg(proto_file);
+            }
 
-        for proto_file in &context.proto_files {
-            cmd.arg(proto_file);
-        }
+            debug!("Executing protoc (actrframework-swift): {:?}", cmd);
+            let output = cmd.output().map_err(|e| {
+                ActrCliError::command_error(format!(
+                    "Failed to execute protoc (actrframework-swift): {e}"
+                ))
+            })?;
 
-        debug!("Executing protoc (actrframework-swift): {:?}", cmd);
-        let output = cmd.output().map_err(|e| {
-            ActrCliError::command_error(format!(
-                "Failed to execute protoc (actrframework-swift): {e}"
-            ))
-        })?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ActrCliError::command_error(format!(
-                "protoc (actrframework-swift) execution failed: {stderr}"
-            )));
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(ActrCliError::command_error(format!(
+                    "protoc (actrframework-swift) execution failed: {stderr}"
+                )));
+            }
         }
 
         // Flatten directory structure: move all swift files from subdirectories to output root
@@ -326,6 +348,53 @@ impl SwiftGenerator {
         Err(ActrCliError::command_error(
             "xcodegen not found. Install via `brew install xcodegen`.".to_string(),
         ))
+    }
+
+    fn has_messages_enums_or_extensions(&self, path: &Path) -> bool {
+        let content = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty()
+                || trimmed.starts_with("//")
+                || trimmed.starts_with("/*")
+                || trimmed.starts_with('*')
+            {
+                continue;
+            }
+            if trimmed.starts_with("message ")
+                || trimmed.starts_with("enum ")
+                || trimmed.starts_with("extend ")
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn has_services(&self, path: &Path) -> bool {
+        let content = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty()
+                || trimmed.starts_with("//")
+                || trimmed.starts_with("/*")
+                || trimmed.starts_with('*')
+            {
+                continue;
+            }
+            if trimmed.starts_with("service ") {
+                return true;
+            }
+        }
+        false
     }
 
     /// Flattens the output directory structure by moving all swift files from

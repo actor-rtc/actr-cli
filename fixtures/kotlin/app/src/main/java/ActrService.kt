@@ -9,16 +9,21 @@ import kotlinx.coroutines.withContext
  *
  * This is a placeholder service. To complete the implementation:
  *
- * 1. Generate the Echo client code:
+ * 1. Install service dependencies to get proto files:
  *    ```
- *    actr gen -l kotlin -i protos/remote/echo-service/echo.proto -o app/src/main/java/{{PACKAGE_PATH}}/generated
+ *    actr install
  *    ```
  *
- * 2. Copy the actr-kotlin library to your project:
+ * 2. Generate the Echo client code:
+ *    ```
+ *    actr gen -l kotlin -i protos/remote/{{service-name}}/{{proto-file}} -o app/src/main/java/{{PACKAGE_PATH}}/generated
+ *    ```
+ *
+ * 3. Copy the actr-kotlin library to your project:
  *    - Option A: Copy actr-kotlin.aar to app/libs/ and add `implementation(files("libs/actr-kotlin.aar"))`
  *    - Option B: Include actr-kotlin as a module dependency
  *
- * 3. Replace this stub with the generated ActrService implementation
+ * 4. Replace this stub with the generated ActrService implementation
  *
  * The generated code will provide:
  * - EchoServiceDispatcher for handling incoming requests
@@ -77,8 +82,8 @@ class ActrService(private val context: Context) {
 
     companion object {
         private const val STUB_ERROR_MESSAGE = 
-            "ActrService is not generated. Run:\n" +
-            "actr gen -l kotlin -i protos/remote/echo-service/echo.proto -o app/src/main/java/{{PACKAGE_PATH}}/generated"
+            "ActrService is not generated. First run 'actr install', then:\n" +
+            "actr gen -l kotlin -i protos/remote/{{service-name}}/{{proto-file}} -o app/src/main/java/{{PACKAGE_PATH}}/generated"
     }
 }
 

@@ -4,14 +4,22 @@ options:
 
 packages:
   actr-swift:
+    {{#if ACTR_LOCAL_PATH}}
+    path: {{ACTR_LOCAL_PATH}}/actr-swift
+    {{else}}
     url: https://github.com/actor-rtc/actr-swift
-    from: 0.1.9
+    from: {{ACTR_SWIFT_VERSION}}
+    {{/if}}
   actr-protocols:
+    {{#if ACTR_LOCAL_PATH}}
+    path: {{ACTR_LOCAL_PATH}}/actr-protocols-swift
+    {{else}}
     url: https://github.com/actor-rtc/actr-protocols-swift
-    from: 0.1.0
+    from: {{ACTR_PROTOCOLS_VERSION}}
+    {{/if}}
   SwiftProtobuf:
     url: https://github.com/apple/swift-protobuf.git
-    from: 1.20.0
+    from: 1.33.3
 
 targets:
   {{PROJECT_NAME_PASCAL}}:

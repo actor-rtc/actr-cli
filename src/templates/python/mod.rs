@@ -7,16 +7,12 @@ use std::collections::HashMap;
 pub struct PythonTemplate;
 
 impl LangTemplate for PythonTemplate {
-    fn load_files(
-        &self,
-        template_name: ProjectTemplateName,
-        service_name: &str,
-    ) -> Result<HashMap<String, String>> {
+    fn load_files(&self, template_name: ProjectTemplateName) -> Result<HashMap<String, String>> {
         let mut files = HashMap::new();
 
         match template_name {
             ProjectTemplateName::Echo => {
-                echo::load(&mut files, service_name)?;
+                echo::load(&mut files)?;
             }
         }
 
