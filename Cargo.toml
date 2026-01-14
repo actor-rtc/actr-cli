@@ -16,9 +16,9 @@ path = "src/main.rs"
 # actr-protocol = { path = "../actr/crates/protocol" }
 # actr-config = { path = "../actr/crates/config" }
 # actr-version = { path = "../actr/crates/version" }
-actr-protocol = { git = "https://github.com/actor-rtc/actr.git", rev = "09757bb556045d2b85edf4812c12db2afd3d2dd5" }
-actr-config = { git = "https://github.com/actor-rtc/actr.git", rev = "09757bb556045d2b85edf4812c12db2afd3d2dd5" }
-actr-version = { git = "https://github.com/actor-rtc/actr.git", rev = "09757bb556045d2b85edf4812c12db2afd3d2dd5" }
+actr-protocol = { git = "https://github.com/actor-rtc/actr.git", rev = "79bc38887c2afb8a629c3e52cf5474db4c2d6baa" }
+actr-config = { git = "https://github.com/actor-rtc/actr.git", rev = "79bc38887c2afb8a629c3e52cf5474db4c2d6baa" }
+actr-version = { git = "https://github.com/actor-rtc/actr.git", rev = "79bc38887c2afb8a629c3e52cf5474db4c2d6baa" }
 
 [dependencies]
 # Actor-RTC crates - only what CLI actually needs
@@ -87,7 +87,7 @@ quote = "1.0"
 proc-macro2 = "1.0"
 bytes = "1.0"
 heck = "0.5.0"                                   # for case conversion
-tokio-tungstenite = "0.28.0"
+tokio-tungstenite = { version = "0.28.0", features = ["native-tls"] }
 futures-util = "0.3.31"
 uuid = { version = "1.19.0", features = ["v4"] }
 

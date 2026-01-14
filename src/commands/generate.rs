@@ -68,6 +68,9 @@ pub struct GenCommand {
 #[async_trait]
 impl Command for GenCommand {
     async fn execute(&self) -> Result<()> {
+        // Check if Actr.lock.toml exists
+        self.check_lock_file()?;
+
         // Determine output path based on language
         let output = self.determine_output_path()?;
 
@@ -121,6 +124,26 @@ impl Command for GenCommand {
 }
 
 impl GenCommand {
+    /// Check if Actr.lock.toml exists and provide helpful error message if not
+    fn check_lock_file(&self) -> Result<()> {
+        let config_dir = self
+            .config
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let lock_file_path = config_dir.join("Actr.lock.toml");
+
+        if !lock_file_path.exists() {
+            return Err(ActrCliError::config_error(
+                "Actr.lock.toml not found\n\n\
+                The lock file is required for code generation. Please run:\n\n\
+                \x20\x20\x20\x20actr install\n\n\
+                This will generate Actr.lock.toml based on your Actr.toml configuration.",
+            ));
+        }
+
+        Ok(())
+    }
+
     /// Determine output path based on language if not explicitly specified
     fn determine_output_path(&self) -> Result<PathBuf> {
         // If user specified a custom output, use it

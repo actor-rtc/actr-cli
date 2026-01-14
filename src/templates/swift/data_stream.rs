@@ -13,7 +13,7 @@ pub fn load(files: &mut HashMap<String, String>) -> Result<()> {
         "project.yml",
     )?;
     ProjectTemplate::load_file(
-        &fixtures_root.join("swift/echo/Actr.toml.hbs"),
+        &fixtures_root.join("swift/data-stream/Actr.toml.hbs"),
         files,
         "Actr.toml",
     )?;
@@ -21,16 +21,6 @@ pub fn load(files: &mut HashMap<String, String>) -> Result<()> {
         &fixtures_root.join("swift/gitignore.hbs"),
         files,
         ".gitignore",
-    )?;
-    ProjectTemplate::load_file(
-        &fixtures_root.join("swift/echo/README.md.hbs"),
-        files,
-        "README.md",
-    )?;
-    ProjectTemplate::load_file(
-        &fixtures_root.join("swift/echo/README.zh-CN.md.hbs"),
-        files,
-        "README.zh-CN.md",
     )?;
     ProjectTemplate::load_file(
         &fixtures_root.join("swift/Info.plist.hbs"),
@@ -43,12 +33,12 @@ pub fn load(files: &mut HashMap<String, String>) -> Result<()> {
         "{{PROJECT_NAME_PASCAL}}/{{PROJECT_NAME_PASCAL}}.swift",
     )?;
     ProjectTemplate::load_file(
-        &fixtures_root.join("swift/echo/ContentView.swift.hbs"),
+        &fixtures_root.join("swift/data-stream/ContentView.swift.hbs"),
         files,
         "{{PROJECT_NAME_PASCAL}}/ContentView.swift",
     )?;
     ProjectTemplate::load_file(
-        &fixtures_root.join("swift/echo/ActrService.swift.hbs"),
+        &fixtures_root.join("swift/data-stream/ActrService.swift.hbs"),
         files,
         "{{PROJECT_NAME_PASCAL}}/ActrService.swift",
     )?;

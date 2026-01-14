@@ -1,0 +1,45 @@
+import Actr
+import Foundation
+import OSLog
+
+private let logger = Logger(subsystem: "io.actr.{{PROJECT_NAME}}", category: "ActrService+DataStream")
+
+extension ActrService {
+    /// Send a file via RPC request
+    /// - Parameter fileURL: The URL of the file to send
+    /// - Returns: SendFileResponse containing the result of the file transfer
+    func sendFile(fileURL: URL) async throws -> {{PROJECT_NAME_PASCAL}}_SendFileResponse {
+        guard connectionStatus == .connected else {
+            throw ActrError.StateError(msg: "Not connected to server")
+        }
+
+        guard let actr = actr else {
+            throw ActrError.StateError(msg: "Actor reference not available")
+        }
+
+        do {
+            // Read file name from URL
+            let filename = fileURL.lastPathComponent
+            
+            // Create request with file name
+            var request = {{PROJECT_NAME_PASCAL}}_SendFileRequest()
+            request.filename = filename
+
+            logger.info("Sending file: \(filename)")
+
+            // Call RPC
+            let response = try await actr.call(request)
+
+            logger.info("File transfer completed: success=\(response.success)")
+
+            return response
+        } catch let actrError as ActrError {
+            logger.error("File send error: \(actrError.localizedDescription)")
+            throw actrError
+        } catch {
+            logger.error("File send error: \(error.localizedDescription)")
+            throw error
+        }
+    }
+}
+

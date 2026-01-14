@@ -3,24 +3,24 @@ exports = []
 
 [package]
 name = "{{PROJECT_NAME}}"
-description = "Echo client app"
+description = "Data stream client app"
 authors = ["Actr-Team"]
 license = "Apache-2.0"
 tags = ["dev", "client"]
 
 [package.actr_type]
 manufacturer = "acme"
-name = "echo-client-app"
+name = "data-stream-client-app"
 
 [dependencies]
-echo-echo-server = { actr_type = "acme+EchoService" }
+data-stream-peer-concurrent-server-python = { actr_type = "acme+DataStreamConcurrentServer" }
 
 [system.signaling]
 # When running on a physical device, do not use localhost/127.0.0.1.
 url = "{{SIGNALING_URL}}/signaling/ws"
 
 [system.deployment]
-realm_id = 0
+realm_id = 2368266035
 
 [system.discovery]
 visible = true
@@ -33,8 +33,8 @@ tracing_service_name = "{{PROJECT_NAME}}"
 
 [system.webrtc]
 force_relay = false
-stun_urls = ["stun:127.0.0.1:3478"]
-turn_urls = ["turn:127.0.0.1:3478"]
+stun_urls = ["stun:actrix1.develenv.com:3478"]
+turn_urls = ["turn:actrix1.develenv.com:3478"]
 
 [scripts]
 dev = "xcodegen generate"
@@ -44,4 +44,4 @@ test = "xcodebuild test"
 
 [[acl.rules]]
 permission = "allow"
-types = ["acme+EchoService"]
+types = ["acme+DataStreamService"]

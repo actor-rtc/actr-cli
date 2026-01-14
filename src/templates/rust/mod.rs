@@ -16,6 +16,11 @@ impl LangTemplate for RustTemplate {
             ProjectTemplateName::Echo => {
                 echo::load(&mut files)?;
             }
+            ProjectTemplateName::DataStream => {
+                return Err(crate::error::ActrCliError::Unsupported(
+                    "DataStream template is not supported for Rust yet".to_string(),
+                ));
+            }
         }
 
         Ok(files)

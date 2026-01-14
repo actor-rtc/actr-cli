@@ -165,9 +165,14 @@ pub async fn fetch_latest_git_tag(url: &str, fallback: &str) -> String {
                 stdout
                     .lines()
                     .filter_map(|line| {
-                        line.split("refs/tags/")
-                            .nth(1)
-                            .map(|tag| tag.trim().to_string())
+                        line.split("refs/tags/").nth(1).map(|tag| {
+                            let tag = tag.trim();
+                            if let Some(stripped) = tag.strip_prefix('v') {
+                                stripped.to_string()
+                            } else {
+                                tag.to_string()
+                            }
+                        })
                     })
                     .rfind(|tag| !tag.contains("^{}")) // Filter out dereferenced tags
             }

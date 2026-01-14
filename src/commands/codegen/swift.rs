@@ -1,12 +1,13 @@
 use crate::commands::codegen::traits::{GenContext, LanguageGenerator};
 use crate::error::{ActrCliError, Result};
 use crate::utils::{command_exists, to_pascal_case};
+use actr_config::LockFile;
 use async_trait::async_trait;
 use handlebars::Handlebars;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use walkdir::WalkDir;
 
 const ACTR_SERVICE_TEMPLATE: &str = include_str!(concat!(
@@ -18,14 +19,6 @@ const ACTR_SERVICE_TEMPLATE: &str = include_str!(concat!(
 const PROTOC: &str = "protoc";
 const PROTOC_GEN_SWIFT: &str = "protoc-gen-swift";
 const PROTOC_GEN_ACTR_FRAMEWORK_SWIFT: &str = "protoc-gen-actrframework-swift";
-const REQUIRED_TOOLS: &[(&str, &str)] = &[
-    (PROTOC, "Protocol Buffers compiler"),
-    (PROTOC_GEN_SWIFT, "Protocol Buffers Swift codegen plugin"),
-    (
-        PROTOC_GEN_ACTR_FRAMEWORK_SWIFT,
-        "ActrFramework Swift codegen plugin",
-    ),
-];
 
 pub struct SwiftGenerator;
 
@@ -51,9 +44,35 @@ impl LanguageGenerator for SwiftGenerator {
             context.input_path.as_path()
         };
 
-        // 1. Separate local and remote files, and build relative paths
+        // 1. Load Actr.lock.toml if available (it always has actr_type)
+        // Try to find Actr.lock.toml by searching up from proto_root
+        let lock_file_path = proto_root
+            .ancestors()
+            .find_map(|p| {
+                let lock_path = p.join("Actr.lock.toml");
+                if lock_path.exists() {
+                    Some(lock_path)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| proto_root.join("Actr.lock.toml"));
+        let lock_file = LockFile::from_file(&lock_file_path).ok();
+        if lock_file.is_some() {
+            debug!("Loaded Actr.lock.toml from: {:?}", lock_file_path);
+        } else {
+            debug!(
+                "Actr.lock.toml not found at: {:?} (will fallback to Config only)",
+                lock_file_path
+            );
+        }
+
+        // 2. Separate local and remote files, and build relative paths
+        // Also build a mapping from proto file paths to their actr_type
         let mut remote_paths = Vec::new();
         let mut local_paths = Vec::new();
+        let mut remote_file_to_actr_type: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
 
         for proto_file in &context.proto_files {
             let is_remote = proto_file.to_string_lossy().contains("/remote/");
@@ -61,7 +80,85 @@ impl LanguageGenerator for SwiftGenerator {
             let path_str = relative_path.to_string_lossy().to_string();
 
             if is_remote {
-                remote_paths.push(path_str);
+                remote_paths.push(path_str.clone());
+                // Try to find matching dependency by proto file path
+                // Proto file path format: <dependency-alias>/<filename>.proto
+                // or remote/<dependency-alias>/<filename>.proto
+                if let Some(dep_alias) = relative_path
+                    .parent()
+                    .and_then(|p| p.file_name())
+                    .and_then(|n| n.to_str())
+                {
+                    debug!(
+                        "Trying to match dependency alias: {} for proto file: {}",
+                        dep_alias, path_str
+                    );
+
+                    // First, try to get actr_type from Config
+                    let mut actr_type_str: Option<String> = None;
+
+                    if let Some(dep) = context
+                        .config
+                        .dependencies
+                        .iter()
+                        .find(|d| d.alias == dep_alias)
+                    {
+                        debug!(
+                            "Found matching dependency in Config: alias={}, actr_type={:?}",
+                            dep.alias, dep.actr_type
+                        );
+                        if let Some(ref actr_type) = dep.actr_type {
+                            // Convert ActrType to string representation (manufacturer+name)
+                            actr_type_str =
+                                Some(format!("{}+{}", actr_type.manufacturer, actr_type.name));
+                            debug!(
+                                "Got actr_type from Config: {}",
+                                actr_type_str.as_ref().unwrap()
+                            );
+                        }
+                    }
+
+                    // If not found in Config, try to get from LockFile
+                    if actr_type_str.is_none() {
+                        if let Some(ref lock) = lock_file {
+                            // LockFile uses 'name' field to match (which is the dependency name/alias)
+                            if let Some(locked_dep) = lock.get_dependency(dep_alias) {
+                                debug!(
+                                    "Found matching dependency in LockFile: name={}, actr_type={}",
+                                    locked_dep.name, locked_dep.actr_type
+                                );
+                                actr_type_str = Some(locked_dep.actr_type.clone());
+                            } else {
+                                debug!(
+                                    "No matching dependency found in LockFile for name: {} (available names: {:?})",
+                                    dep_alias,
+                                    lock.dependencies
+                                        .iter()
+                                        .map(|d| &d.name)
+                                        .collect::<Vec<_>>()
+                                );
+                            }
+                        } else {
+                            debug!(
+                                "LockFile not found or could not be loaded: {:?}",
+                                lock_file_path
+                            );
+                        }
+                    }
+
+                    // If we found an actr_type, add it to the mapping
+                    if let Some(actr_type) = actr_type_str {
+                        remote_file_to_actr_type.insert(path_str.clone(), actr_type.clone());
+                        debug!("Mapped proto file {} to actr_type {}", path_str, actr_type);
+                    } else {
+                        debug!(
+                            "Could not find actr_type for dependency alias: {}",
+                            dep_alias
+                        );
+                    }
+                } else {
+                    debug!("Could not extract dependency alias from path: {}", path_str);
+                }
             } else {
                 local_paths.push(path_str);
             }
@@ -75,6 +172,17 @@ impl LanguageGenerator for SwiftGenerator {
 
         if !remote_paths.is_empty() {
             options.push_str(&format!(",RemoteFiles={}", remote_paths.join(":")));
+            // Add RemoteFileActrTypes mapping: file1:actr_type1,file2:actr_type2
+            if !remote_file_to_actr_type.is_empty() {
+                let actr_type_mappings: Vec<String> = remote_file_to_actr_type
+                    .iter()
+                    .map(|(file, actr_type)| format!("{}:{}", file, actr_type))
+                    .collect();
+                options.push_str(&format!(
+                    ",RemoteFileActrTypes={}",
+                    actr_type_mappings.join(",")
+                ));
+            }
         }
 
         if !local_paths.is_empty() {
@@ -206,11 +314,17 @@ impl LanguageGenerator for SwiftGenerator {
             guessed_name
         };
 
-        let workload_name = if let Some(service) = services.first() {
-            format!("{}Workload", service.name)
-        } else {
-            format!("{}Workload", to_pascal_case(&context.config.package.name))
-        };
+        // Try to read workload name from generated local.actor.swift file
+        let workload_name = self
+            .extract_workload_name_from_generated_file(&context.output)
+            .unwrap_or_else(|| {
+                // Fallback to generating based on service or package name
+                if let Some(service) = services.first() {
+                    format!("{}Workload", service.name)
+                } else {
+                    format!("{}Workload", to_pascal_case(&context.config.package.name))
+                }
+            });
 
         let user_file_path = context
             .output
@@ -228,6 +342,13 @@ impl LanguageGenerator for SwiftGenerator {
             } else if !context.overwrite_user_code {
                 // Skip non-scaffold files unless overwrite is forced
                 info!("⏭️  Skipping existing user code file: {:?}", user_file_path);
+                info!("");
+                info!("💡 ActrService.swift already exists with user code.");
+                info!("   The file was likely created during `actr init` with a template.");
+                info!(
+                    "   User code scaffold generation is skipped to preserve your implementation."
+                );
+                info!("   Use --overwrite-user-code flag if you want to regenerate the scaffold.");
                 return Ok(scaffold_files);
             } else {
                 info!(
@@ -307,23 +428,60 @@ impl LanguageGenerator for SwiftGenerator {
 
 impl SwiftGenerator {
     fn ensure_required_tools(&self) -> Result<()> {
-        let mut missing_tools = Vec::new();
-        for (tool, description) in REQUIRED_TOOLS {
-            if !command_exists(tool) {
-                missing_tools.push((tool, description));
+        // 1. Ensure protoc is available (we do not auto-install it to avoid
+        //    making assumptions about the user's package manager environment).
+        let mut missing_tools: Vec<(&str, &str)> = Vec::new();
+        if !command_exists(PROTOC) {
+            missing_tools.push((PROTOC, "Protocol Buffers compiler"));
+        }
+
+        // 2. Try to ensure Swift plugins are available. For these we make a
+        //    best-effort attempt to auto-install and only fail if they are
+        //    still missing afterwards.
+        if !command_exists(PROTOC_GEN_SWIFT) {
+            self.try_install_swift_protobuf()?;
+            if !command_exists(PROTOC_GEN_SWIFT) {
+                missing_tools.push((
+                    PROTOC_GEN_SWIFT,
+                    "Protocol Buffers Swift codegen plugin (usually provided by swift-protobuf)",
+                ));
             }
         }
 
-        if !missing_tools.is_empty() {
-            let mut error_msg = "Missing required tools:\n".to_string();
-            for (tool, description) in missing_tools {
-                error_msg.push_str(&format!("  - {tool} ({description})\n"));
+        if !command_exists(PROTOC_GEN_ACTR_FRAMEWORK_SWIFT) {
+            self.try_install_actrframework_swift_plugin()?;
+            if !command_exists(PROTOC_GEN_ACTR_FRAMEWORK_SWIFT) {
+                missing_tools.push((
+                    PROTOC_GEN_ACTR_FRAMEWORK_SWIFT,
+                    "ActrFramework Swift codegen plugin (protoc-gen-actrframework-swift)",
+                ));
             }
-            error_msg.push_str("\nPlease install the missing tools and try again.");
-            return Err(ActrCliError::command_error(error_msg));
         }
 
-        Ok(())
+        if missing_tools.is_empty() {
+            return Ok(());
+        }
+
+        let mut error_msg = "Missing required tools:\n".to_string();
+        for (tool, description) in &missing_tools {
+            error_msg.push_str(&format!("  - {tool} ({description})\n"));
+        }
+
+        error_msg
+            .push_str("\nTried automatic installation for Swift-related plugins where possible.\n");
+        error_msg.push_str("Please install the missing tools manually and try again.\n\n");
+        error_msg.push_str("Suggested installation commands:\n");
+        error_msg.push_str(
+            "  - protoc: install via your package manager, e.g. `brew install protobuf`\n",
+        );
+        error_msg.push_str(
+            "  - protoc-gen-swift: `brew install swift-protobuf` or see https://github.com/apple/swift-protobuf\n",
+        );
+        error_msg.push_str(
+            "  - protoc-gen-actrframework-swift: please follow the Actr Swift documentation for installation.\n",
+        );
+
+        Err(ActrCliError::command_error(error_msg))
     }
 
     fn should_overwrite_scaffold(&self, path: &Path) -> Result<bool> {
@@ -332,12 +490,43 @@ impl SwiftGenerator {
             Err(_) => return Ok(false),
         };
 
-        let markers = [
+        // Check for "implemented" marker - if present, never overwrite
+        if content.contains("ActrService is Implemented") {
+            return Ok(false);
+        }
+
+        // Check for scaffold markers
+        let scaffold_markers = [
             "ActrService is not implemented",
             "ActrService is not generated",
         ];
+        let has_scaffold_marker = scaffold_markers
+            .iter()
+            .any(|marker| content.contains(marker));
 
-        Ok(markers.iter().any(|marker| content.contains(marker)))
+        // If no scaffold marker, it's user code - don't overwrite
+        if !has_scaffold_marker {
+            return Ok(false);
+        }
+
+        // Even if it has scaffold markers, check if it contains substantial user implementation
+        // If the file has ActrService class with initialize and shutdown methods,
+        // it's likely user code that should be preserved
+        let has_actr_service_class =
+            content.contains("final class ActrService") || content.contains("class ActrService");
+        let has_initialize_method = content.contains("func initialize()");
+        let has_shutdown_method = content.contains("func shutdown()");
+
+        // If it has ActrService class with core methods, treat it as user code
+        // This covers cases where users have implemented the core functionality
+        // even if they haven't removed the scaffold markers
+        if has_actr_service_class && has_initialize_method && has_shutdown_method {
+            return Ok(false);
+        }
+
+        // Only overwrite if it has scaffold markers and appears to be a minimal scaffold
+        // (e.g., just the basic structure without substantial implementation)
+        Ok(true)
     }
 
     fn ensure_xcodegen_available(&self) -> Result<()> {
@@ -348,6 +537,65 @@ impl SwiftGenerator {
         Err(ActrCliError::command_error(
             "xcodegen not found. Install via `brew install xcodegen`.".to_string(),
         ))
+    }
+
+    /// Best-effort automatic installation for the Swift Protobuf plugin.
+    ///
+    /// On macOS with Homebrew available this will run:
+    ///   brew install swift-protobuf
+    ///
+    /// Any failure is logged as a warning and does not immediately error; the
+    /// caller is expected to re-check the tool availability and present a
+    /// helpful manual-install message if still missing.
+    fn try_install_swift_protobuf(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        {
+            if !command_exists("brew") {
+                debug!("Homebrew not found; skipping automatic swift-protobuf installation");
+                return Ok(());
+            }
+
+            info!("📦 Installing swift-protobuf via Homebrew (for protoc-gen-swift)...");
+            let output = StdCommand::new("brew")
+                .arg("install")
+                .arg("swift-protobuf")
+                .output()
+                .map_err(|e| {
+                    ActrCliError::command_error(format!(
+                        "Failed to run Homebrew for swift-protobuf installation: {e}"
+                    ))
+                })?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                warn!(
+                    "swift-protobuf installation via Homebrew failed, please install manually.\n{}",
+                    stderr
+                );
+            } else {
+                info!("✅ swift-protobuf installation completed");
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            debug!("Automatic swift-protobuf installation is only supported on macOS (Homebrew)");
+        }
+
+        Ok(())
+    }
+
+    /// Best-effort automatic installation hook for protoc-gen-actrframework-swift.
+    ///
+    /// Currently we do not know a standardized installation command for this
+    /// plugin, so this function only serves as an extension point and logs a
+    /// helpful message. The actual failure is surfaced by ensure_required_tools.
+    fn try_install_actrframework_swift_plugin(&self) -> Result<()> {
+        warn!(
+            "Automatic installation for protoc-gen-actrframework-swift is not configured.\n\
+             Please install the plugin following the Actr Swift documentation."
+        );
+        Ok(())
     }
 
     fn has_messages_enums_or_extensions(&self, path: &Path) -> bool {
@@ -649,6 +897,36 @@ impl SwiftGenerator {
             }
         }
         services
+    }
+
+    /// Extract workload name from generated local.actor.swift file
+    fn extract_workload_name_from_generated_file(&self, output_dir: &Path) -> Option<String> {
+        let local_actor_path = output_dir.join("local.actor.swift");
+
+        if let Ok(content) = std::fs::read_to_string(&local_actor_path) {
+            // Look for pattern: "public actor <WorkloadName> {"
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("public actor ") && trimmed.contains(" {") {
+                    // Extract the actor name
+                    if let Some(start) = trimmed.find("public actor ") {
+                        let rest = &trimmed[start + 13..]; // "public actor ".len() = 13
+                        if let Some(end) = rest.find(' ') {
+                            let workload_name = rest[..end].trim();
+                            if !workload_name.is_empty() {
+                                debug!(
+                                    "Extracted workload name from local.actor.swift: {}",
+                                    workload_name
+                                );
+                                return Some(workload_name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        None
     }
 
     fn generate_scaffold_content(

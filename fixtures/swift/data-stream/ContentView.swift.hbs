@@ -1,0 +1,134 @@
+import SwiftUI
+import UniformTypeIdentifiers
+import OSLog
+
+private let logger = Logger(subsystem: "io.actr.{{PROJECT_NAME}}", category: "ContentView")
+
+struct ContentView: View {
+    @StateObject private var actrService = ActrService()
+    @State private var responseText = ""
+    @State private var isInitialized = false
+    @State private var isImporting = false
+    @State private var selectedFileName = ""
+
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 16) {
+                Text("{{PROJECT_NAME_PASCAL}}")
+                    .font(.largeTitle.weight(.bold))
+
+                Text("Status: \(actrService.connectionStatus.description)")
+                    .font(.subheadline)
+                    .foregroundColor(statusColor)
+
+                Button(action: { isImporting = true }) {
+                    HStack {
+                        Image(systemName: "doc.badge.plus")
+                        Text(selectedFileName.isEmpty ? "Select File to Send" : "Selected: \(selectedFileName)")
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(actrService.connectionStatus == .connected ? Color.green : Color.gray)
+                    .foregroundColor(.white)
+                    .cornerRadius(8)
+                }
+                .disabled(actrService.connectionStatus != .connected)
+
+                if !responseText.isEmpty {
+                    Text(responseText)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                        .background(Color.gray.opacity(0.15))
+                        .cornerRadius(8)
+                }
+
+                Spacer()
+            }
+            .padding()
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .onAppear {
+            guard !isInitialized else { return }
+            initializeActrService()
+        }
+        .fileImporter(
+            isPresented: $isImporting,
+            allowedContentTypes: [.data, .content, .item],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first {
+                    selectedFileName = url.lastPathComponent
+                    sendFile(url: url)
+                }
+            case .failure(let error):
+                responseText = "File selection failed: \(error.localizedDescription)"
+            }
+        }
+        .alert("Error", isPresented: Binding(
+            get: { actrService.errorMessage != nil },
+            set: { if !$0 { actrService.errorMessage = nil } }
+        )) {
+            Button("OK") {
+                actrService.errorMessage = nil
+            }
+        } message: {
+            Text(actrService.errorMessage ?? "Unknown error")
+        }
+    }
+
+    private var statusColor: Color {
+        switch actrService.connectionStatus {
+        case .disconnected:
+            return Color.gray
+        case .initializing:
+            return Color.orange
+        case .connected:
+            return Color.green
+        case .error:
+            return Color.red
+        }
+    }
+
+    private func initializeActrService() {
+        Task {
+            do {
+                try await actrService.initialize()
+                isInitialized = true
+            } catch {
+                responseText = "Initialization failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func sendFile(url: URL) {
+        responseText = "Preparing to send file: \(url.lastPathComponent)..."
+        
+        Task {
+            do {
+                // Ensure we have access to the file if it's outside the app's sandbox
+                guard url.startAccessingSecurityScopedResource() else {
+                    responseText = "Access denied to file: \(url.lastPathComponent)"
+                    return
+                }
+                defer { url.stopAccessingSecurityScopedResource() }
+                
+                let response = try await actrService.sendFile(fileURL: url)
+                if response.success {
+                    responseText = "File sent successfully!"
+                    selectedFileName = ""
+                } else {
+                    responseText = "File transfer failed"
+                }
+            } catch {
+                responseText = "File send failed: \(error.localizedDescription)"
+                logger.error("File send error: \(error.localizedDescription)")
+            }
+        }
+    }
+}
+
+#Preview {
+    ContentView()
+}

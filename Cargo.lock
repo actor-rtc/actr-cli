@@ -50,7 +50,7 @@ dependencies = [
 [[package]]
 name = "actr-config"
 version = "0.1.7"
-source = "git+https://github.com/actor-rtc/actr.git?rev=09757bb556045d2b85edf4812c12db2afd3d2dd5#09757bb556045d2b85edf4812c12db2afd3d2dd5"
+source = "git+https://github.com/actor-rtc/actr.git?rev=79bc38887c2afb8a629c3e52cf5474db4c2d6baa#79bc38887c2afb8a629c3e52cf5474db4c2d6baa"
 dependencies = [
  "actr-protocol",
  "actr-version",
@@ -99,7 +99,7 @@ dependencies = [
 [[package]]
 name = "actr-protocol"
 version = "0.1.6"
-source = "git+https://github.com/actor-rtc/actr.git?rev=09757bb556045d2b85edf4812c12db2afd3d2dd5#09757bb556045d2b85edf4812c12db2afd3d2dd5"
+source = "git+https://github.com/actor-rtc/actr.git?rev=79bc38887c2afb8a629c3e52cf5474db4c2d6baa#79bc38887c2afb8a629c3e52cf5474db4c2d6baa"
 dependencies = [
  "anyhow",
  "base122-rs",
@@ -120,7 +120,7 @@ dependencies = [
 [[package]]
 name = "actr-version"
 version = "0.1.4"
-source = "git+https://github.com/actor-rtc/actr.git?rev=09757bb556045d2b85edf4812c12db2afd3d2dd5#09757bb556045d2b85edf4812c12db2afd3d2dd5"
+source = "git+https://github.com/actor-rtc/actr.git?rev=79bc38887c2afb8a629c3e52cf5474db4c2d6baa#79bc38887c2afb8a629c3e52cf5474db4c2d6baa"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -2401,7 +2401,9 @@ checksum = "d25a406cddcc431a75d3d9afc6a7c0f7428d4891dd973e4d54c56b46127bf857"
 dependencies = [
  "futures-util",
  "log",
+ "native-tls",
  "tokio",
+ "tokio-native-tls",
  "tungstenite",
 ]
 
@@ -2621,6 +2623,7 @@ dependencies = [
  "http",
  "httparse",
  "log",
+ "native-tls",
  "rand",
  "sha1",
  "thiserror 2.0.17",

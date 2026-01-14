@@ -86,7 +86,12 @@ impl Command for InitCommand {
         }
 
         // Generate project structure
-        self.generate_project_structure(&project_dir, &project_name, &signaling_url)?;
+        self.generate_project_structure(
+            &project_dir,
+            &project_name,
+            &signaling_url,
+            self.template,
+        )?;
 
         info!(
             "✅ Successfully created Actor-RTC project '{}'",
@@ -141,15 +146,16 @@ impl InitCommand {
         project_dir: &Path,
         project_name: &str,
         signaling_url: &str,
+        template: ProjectTemplateName,
     ) -> Result<()> {
         // Always use cargo init for all scenarios
         if project_dir == Path::new(".") {
             // Current directory init - let cargo handle naming
-            self.init_with_cargo(project_dir, None, signaling_url)?;
+            self.init_with_cargo(project_dir, None, signaling_url, template)?;
         } else {
             // New directory - create it and use cargo init with explicit name
             std::fs::create_dir_all(project_dir)?;
-            self.init_with_cargo(project_dir, Some(project_name), signaling_url)?;
+            self.init_with_cargo(project_dir, Some(project_name), signaling_url, template)?;
         }
 
         Ok(())
@@ -253,7 +259,7 @@ test = "cargo test"
                 println!("│     wss://example.com/?token=${{TOKEN}}   (with auth)    │");
                 println!("│                                                          │");
                 println!("└──────────────────────────────────────────────────────────┘");
-                print!("🎯 Enter signaling server URL [ws://localhost:8080]: ");
+                print!("🎯 Enter signaling server URL [wss://actrix1.develenv.com]: ");
             }
             _ => {
                 print!("🎯 Enter {field_name}: ");
@@ -274,7 +280,7 @@ test = "cargo test"
             // Provide sensible defaults
             let default = match field_name {
                 "project name" => "my-actor-project",
-                "signaling server URL" => "ws://localhost:8080",
+                "signaling server URL" => "wss://actrix1.develenv.com",
                 _ => {
                     return Err(ActrCliError::InvalidProject(format!(
                         "{field_name} cannot be empty"
@@ -332,6 +338,7 @@ test = "cargo test"
         project_dir: &Path,
         explicit_name: Option<&str>,
         signaling_url: &str,
+        template: ProjectTemplateName,
     ) -> Result<()> {
         info!("🚀 Initializing Rust project with cargo...");
 
@@ -360,7 +367,7 @@ test = "cargo test"
         info!("📦 Rust project initialized: '{}'", project_name);
 
         // Step 3: Enhance with Actor-RTC specific files
-        self.enhance_cargo_project_for_actr(project_dir, &project_name, signaling_url)?;
+        self.enhance_cargo_project_for_actr(project_dir, &project_name, signaling_url, template)?;
 
         Ok(())
     }
@@ -390,13 +397,22 @@ test = "cargo test"
         project_dir: &Path,
         project_name: &str,
         signaling_url: &str,
+        template: ProjectTemplateName,
     ) -> Result<()> {
         info!("⚡ Enhancing with Actor-RTC features...");
 
         // Create proto directory
-        let proto_dir = project_dir.join("proto");
+        let proto_dir = project_dir.join("protos");
         std::fs::create_dir_all(&proto_dir)?;
-        info!("📁 Created proto/ directory");
+        info!("📁 Created protos/ directory");
+
+        // Create local.proto file using template
+        crate::commands::initialize::create_local_proto(
+            project_dir,
+            project_name,
+            "protos/local",
+            template,
+        )?;
 
         // Generate Actr.toml
         self.create_actr_config(project_dir, project_name, signaling_url)?;

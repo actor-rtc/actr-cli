@@ -50,7 +50,7 @@ pub struct InstallCommand {
 #[derive(Debug, Clone)]
 pub enum InstallMode {
     /// Mode 1: Add new dependency (npm install <package>)
-    /// - Pull remote proto to proto/ folder
+    /// - Pull remote proto to protos/ folder
     /// - Modify Actr.toml (add dependency)
     /// - Update Actr.lock.toml
     AddNewPackage { packages: Vec<String> },
@@ -198,7 +198,7 @@ impl InstallCommand {
     }
 
     /// Execute Mode 1: Add new package (actr install <package>)
-    /// - Pull remote proto to proto/ folder
+    /// - Pull remote proto to protos/ folder
     /// - Modify Actr.toml (add dependency)
     /// - Update Actr.lock.toml
     async fn execute_add_package(

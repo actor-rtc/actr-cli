@@ -130,7 +130,7 @@ actr check --verbose</code></pre>
 ├── src/               # Source code
 │   ├── main.rs        # Entrypoint
 │   └── generated/     # Generated code
-├── proto/             # Protocol Buffers definitions
+├── protos/            # Protocol Buffers definitions
 └── docs/              # Project documentation</code></pre>
         </div>
 
@@ -163,7 +163,7 @@ actr check --verbose</code></pre>
 
         // Collect proto files information
         let mut proto_info = Vec::new();
-        let proto_dir = Path::new("proto");
+        let proto_dir = Path::new("protos");
 
         if proto_dir.exists()
             && let Ok(entries) = std::fs::read_dir(proto_dir)
@@ -433,7 +433,7 @@ actr install</code></pre>
             <h2>Dependency Formats</h2>
             <p>Define Protocol Buffers dependencies under <code>[dependencies]</code>:</p>
             <pre><code># Local file path
-user_service = "proto/user.proto"
+user_service = "protos/user.proto"
 
 # HTTP URL
 api_service = "https://example.com/api/service.proto"

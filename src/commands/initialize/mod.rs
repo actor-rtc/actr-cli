@@ -5,11 +5,64 @@ pub mod traits;
 
 use crate::commands::SupportedLanguage;
 use crate::error::{ActrCliError, Result};
+use crate::template::{ProjectTemplateName, TemplateContext};
+use handlebars::Handlebars;
 use kotlin::KotlinInitializer;
 use python::PythonInitializer;
+use std::path::Path;
 use swift::SwiftInitializer;
 
 pub use traits::{InitContext, ProjectInitializer};
+
+/// Generate a local.proto file with the given package name
+pub fn create_local_proto(
+    project_dir: &Path,
+    project_name: &str,
+    proto_dir: &str,
+    template: ProjectTemplateName,
+) -> Result<()> {
+    let proto_path = project_dir.join(proto_dir);
+    std::fs::create_dir_all(&proto_path)?;
+
+    // Load template file
+    let fixtures_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures");
+    let template_file_name = match template {
+        ProjectTemplateName::Echo => "local.echo.hbs",
+        ProjectTemplateName::DataStream => "local.data-stream.hbs",
+    };
+    let template_path = fixtures_root.join("protos").join(template_file_name);
+
+    let template_content = std::fs::read_to_string(&template_path).map_err(|e| {
+        ActrCliError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!(
+                "Failed to read proto template {}: {}",
+                template_path.display(),
+                e
+            ),
+        ))
+    })?;
+
+    // Create template context
+    let template_context = TemplateContext::new(project_name, "", "");
+    let handlebars = Handlebars::new();
+
+    // Render template
+    let local_proto_content = handlebars
+        .render_template(&template_content, &template_context)
+        .map_err(|e| {
+            ActrCliError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to render proto template: {}", e),
+            ))
+        })?;
+
+    let local_proto_path = proto_path.join("local.proto");
+    std::fs::write(&local_proto_path, local_proto_content)?;
+
+    tracing::info!("📄 Created {}", local_proto_path.display());
+    Ok(())
+}
 
 pub struct InitializerFactory;
 

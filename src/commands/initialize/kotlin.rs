@@ -1,4 +1,4 @@
-use super::{InitContext, ProjectInitializer};
+use super::{InitContext, ProjectInitializer, create_local_proto};
 use crate::error::{ActrCliError, Result};
 use crate::templates::ProjectTemplateName;
 use async_trait::async_trait;
@@ -140,6 +140,14 @@ impl ProjectInitializer for KotlinInitializer {
 
         // Copy gradle wrapper
         copy_gradle_wrapper(&context.project_dir)?;
+
+        // Create local.proto file
+        create_local_proto(
+            &context.project_dir,
+            &context.project_name,
+            "protos/local",
+            context.template,
+        )?;
 
         info!("📁 Created Android project structure");
 

@@ -28,6 +28,8 @@ pub const DEFAULT_ACTR_PROTOCOLS_VERSION: &str = "0.1.0";
 pub enum ProjectTemplateName {
     #[default]
     Echo,
+    #[value(name = "data-stream")]
+    DataStream,
 }
 
 impl ProjectTemplateName {
@@ -35,6 +37,7 @@ impl ProjectTemplateName {
     pub fn to_service_name(self) -> &'static str {
         match self {
             ProjectTemplateName::Echo => "echo-service",
+            ProjectTemplateName::DataStream => "data-stream-service",
         }
     }
 }
@@ -62,6 +65,8 @@ pub struct TemplateContext {
     pub manufacturer: String,
     #[serde(rename = "SERVICE_NAME")]
     pub service_name: String,
+    #[serde(rename = "WORKLOAD_NAME")]
+    pub workload_name: String,
     #[serde(rename = "ACTR_SWIFT_VERSION")]
     pub actr_swift_version: String,
     #[serde(rename = "ACTR_PROTOCOLS_VERSION")]
@@ -72,13 +77,15 @@ pub struct TemplateContext {
 
 impl TemplateContext {
     pub fn new(project_name: &str, signaling_url: &str, service_name: &str) -> Self {
+        let project_name_pascal = to_pascal_case(project_name);
         Self {
             project_name: project_name.to_string(),
             project_name_snake: to_snake_case(project_name),
-            project_name_pascal: to_pascal_case(project_name),
+            project_name_pascal: project_name_pascal.clone(),
             signaling_url: signaling_url.to_string(),
             manufacturer: "unknown".to_string(),
             service_name: service_name.to_string(),
+            workload_name: format!("{}Workload", project_name_pascal),
             actr_swift_version: DEFAULT_ACTR_SWIFT_VERSION.to_string(),
             actr_protocols_version: DEFAULT_ACTR_PROTOCOLS_VERSION.to_string(),
             actr_local_path: std::env::var("ACTR_SWIFT_LOCAL_PATH").ok(),
@@ -178,8 +185,8 @@ mod tests {
         assert_eq!(ctx.project_name, "my-chat-service");
         assert_eq!(ctx.project_name_snake, "my_chat_service");
         assert_eq!(ctx.project_name_pascal, "MyChatService");
+        assert_eq!(ctx.workload_name, "MyChatServiceWorkload");
         assert_eq!(ctx.signaling_url, "ws://localhost:8080");
-        assert_eq!(ctx.service_name, "echo-service");
         assert_eq!(ctx.actr_swift_version, DEFAULT_ACTR_SWIFT_VERSION);
         assert_eq!(ctx.actr_protocols_version, DEFAULT_ACTR_PROTOCOLS_VERSION);
     }
@@ -212,7 +219,7 @@ mod tests {
             temp_dir
                 .path()
                 .join("TestApp")
-                .join("TestAppApp.swift")
+                .join("TestApp.swift")
                 .exists()
         );
     }

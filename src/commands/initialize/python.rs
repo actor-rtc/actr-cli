@@ -1,4 +1,4 @@
-use super::{InitContext, ProjectInitializer};
+use super::{InitContext, ProjectInitializer, create_local_proto};
 
 use crate::commands::SupportedLanguage;
 use crate::error::{ActrCliError, Result};
@@ -19,6 +19,14 @@ impl ProjectInitializer for PythonInitializer {
             TemplateContext::new(&context.project_name, &context.signaling_url, service_name);
         template.generate(&context.project_dir, &template_context)?;
 
+        // Create local.proto file
+        create_local_proto(
+            &context.project_dir,
+            &context.project_name,
+            "protos/local",
+            context.template,
+        )?;
+
         run_actr_gen(&context.project_dir)?;
 
         Ok(())
@@ -31,7 +39,7 @@ impl ProjectInitializer for PythonInitializer {
             info!("  cd {}", context.project_dir.display());
         }
         info!("  actr install  # Install remote protobuf dependencies from Actr.toml");
-        info!("  actr gen -l python -i proto/remote/{{service-name}}/{{proto-file}} -o generated");
+        info!("  actr gen -l python -i protos/remote/{{service-name}}/{{proto-file}} -o generated");
         info!("  cd server");
         info!("  python server.py --actr-toml Actr.toml");
         info!("  cd ../client");
@@ -44,7 +52,7 @@ fn run_actr_gen(project_dir: &Path) -> Result<()> {
         .arg("gen")
         .arg("--language")
         .arg("python")
-        .arg("--input=proto")
+        .arg("--input=protos")
         .arg("--output=generated")
         .arg("--no-scaffold")
         .current_dir(project_dir)

@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package {{PROJECT_NAME_SNAKE}};
+
+message SendFileRequest {
+    string file_path = 1;        // File path (URL path)
+}
+
+message SendFileResponse {
+    bool success = 1;           // Transfer completed successfully
+}
+
+// FileTransfer service
+service LocalFileService {
+    // Predefined RPC interfaces
+    rpc StartStream (StartStreamRequest) returns (StartStreamResponse);
+    rpc PrepareClientStream (PrepareClientStreamRequest) returns (PrepareStreamResponse);
+
+    rpc SendFile (SendFileRequest) returns (SendFileResponse);
+}
+
+message StartStreamRequest {
+    string client_id = 1;
+    string stream_id = 2;
+    uint32 message_count = 3;
+}
+
+message StartStreamResponse {
+    bool accepted = 1;
+    string message = 2;
+}
+
+message PrepareClientStreamRequest {
+    string stream_id = 1;
+    uint32 expected_count = 2;
+}
+
+message PrepareStreamResponse {
+    bool ready = 1;
+    string message = 2;
+}

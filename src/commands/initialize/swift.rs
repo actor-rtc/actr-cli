@@ -1,4 +1,4 @@
-use super::{InitContext, ProjectInitializer};
+use super::{InitContext, ProjectInitializer, create_local_proto};
 use crate::commands::SupportedLanguage;
 use crate::error::{ActrCliError, Result};
 use crate::template::{ProjectTemplate, TemplateContext};
@@ -13,7 +13,12 @@ pub struct SwiftInitializer;
 impl ProjectInitializer for SwiftInitializer {
     async fn generate_project_structure(&self, context: &InitContext) -> Result<()> {
         let template = ProjectTemplate::new(context.template, SupportedLanguage::Swift);
-        let service_name = context.template.to_service_name();
+        // For data-stream template, use "LocalFileService" as the service name
+        // For other templates, use the template's service name
+        let service_name = match context.template {
+            crate::template::ProjectTemplateName::DataStream => "LocalFileService",
+            _ => context.template.to_service_name(),
+        };
 
         // Fetch versions asynchronously
         let template_context = TemplateContext::new_with_versions(
@@ -25,8 +30,19 @@ impl ProjectInitializer for SwiftInitializer {
 
         template.generate(&context.project_dir, &template_context)?;
 
+        // Create local.proto file
+        create_local_proto(
+            &context.project_dir,
+            &context.project_name,
+            "protos/local",
+            context.template,
+        )?;
+
         ensure_xcodegen_available()?;
         run_xcodegen_generate(&context.project_dir)?;
+
+        // Create Swift Package Manager registry configuration
+        create_swiftpm_registry_config(&context.project_dir)?;
 
         // Initialize git repository
         init_git_repo(&context.project_dir)?;
@@ -47,7 +63,7 @@ impl ProjectInitializer for SwiftInitializer {
         }
         info!("  actr install  # Install remote protobuf dependencies from Actr.toml");
         info!(
-            "  actr gen -l swift -i protos/remote/{{service-name}}/{{proto-file}} -o {}/Generated",
+            "  actr gen -l swift  # Use default input (protos) and Swift output ({}/Generated)",
             template_context.project_name_pascal
         );
         info!("  xcodegen generate");
@@ -88,6 +104,39 @@ fn run_xcodegen_generate(project_dir: &Path) -> Result<()> {
         )));
     }
 
+    Ok(())
+}
+
+fn create_swiftpm_registry_config(project_dir: &Path) -> Result<()> {
+    let registries_json = r#"{
+    "registries": [
+        {
+            "url": "https://tuist.dev/api/registry/swift",
+            "scopes": [
+                "apple"
+            ]
+        }
+    ]
+}
+"#;
+
+    let config_path = project_dir
+        .join(".swiftpm")
+        .join("configuration")
+        .join("registries.json");
+
+    // Create parent directories if they don't exist
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| {
+            ActrCliError::Command(format!("Failed to create directories: {error}"))
+        })?;
+    }
+
+    std::fs::write(&config_path, registries_json).map_err(|error| {
+        ActrCliError::Command(format!("Failed to write registries.json: {error}"))
+    })?;
+
+    info!("📦 Created Swift Package Manager registry configuration");
     Ok(())
 }
 
