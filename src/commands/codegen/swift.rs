@@ -4,6 +4,7 @@ use crate::utils::{command_exists, to_pascal_case};
 use actr_config::LockFile;
 use async_trait::async_trait;
 use handlebars::Handlebars;
+use owo_colors::OwoColorize;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
@@ -21,6 +22,11 @@ const PROTOC_GEN_SWIFT: &str = "protoc-gen-swift";
 const PROTOC_GEN_ACTR_FRAMEWORK_SWIFT: &str = "protoc-gen-actrframework-swift";
 
 pub struct SwiftGenerator;
+
+fn colorize_warning_output(output: &str) -> String {
+    let warning_label = format!("{}", "Warning:".yellow());
+    output.replace("Warning:", &warning_label)
+}
 
 #[async_trait]
 impl LanguageGenerator for SwiftGenerator {
@@ -428,11 +434,13 @@ impl LanguageGenerator for SwiftGenerator {
 
 impl SwiftGenerator {
     fn ensure_required_tools(&self) -> Result<()> {
-        // 1. Ensure protoc is available (we do not auto-install it to avoid
-        //    making assumptions about the user's package manager environment).
+        // 1. Ensure protoc is available.
         let mut missing_tools: Vec<(&str, &str)> = Vec::new();
         if !command_exists(PROTOC) {
-            missing_tools.push((PROTOC, "Protocol Buffers compiler"));
+            self.try_install_protoc()?;
+            if !command_exists(PROTOC) {
+                missing_tools.push((PROTOC, "Protocol Buffers compiler"));
+            }
         }
 
         // 2. Try to ensure Swift plugins are available. For these we make a
@@ -468,18 +476,29 @@ impl SwiftGenerator {
         }
 
         error_msg
-            .push_str("\nTried automatic installation for Swift-related plugins where possible.\n");
+            .push_str("\nTried automatic installation for Swift-related tools where possible.\n");
         error_msg.push_str("Please install the missing tools manually and try again.\n\n");
         error_msg.push_str("Suggested installation commands:\n");
-        error_msg.push_str(
-            "  - protoc: install via your package manager, e.g. `brew install protobuf`\n",
-        );
-        error_msg.push_str(
-            "  - protoc-gen-swift: `brew install swift-protobuf` or see https://github.com/apple/swift-protobuf\n",
-        );
-        error_msg.push_str(
-            "  - protoc-gen-actrframework-swift: please follow the Actr Swift documentation for installation.\n",
-        );
+        for (tool, _) in &missing_tools {
+            match *tool {
+                PROTOC => {
+                    error_msg.push_str(
+                        "  - protoc: install via your package manager, e.g. `brew install protobuf` or `brew reinstall protobuf`\n",
+                    );
+                }
+                PROTOC_GEN_SWIFT => {
+                    error_msg.push_str(
+                        "  - protoc-gen-swift: install via your package manager, e.g. `brew install swift-protobuf` or `brew reinstall swift-protobuf`; see https://github.com/apple/swift-protobuf\n",
+                    );
+                }
+                PROTOC_GEN_ACTR_FRAMEWORK_SWIFT => {
+                    error_msg.push_str(
+                        "  - protoc-gen-actrframework-swift: install via your package manager, e.g. `brew install protoc-gen-actrframework-swift` or `brew reinstall protoc-gen-actrframework-swift`\n",
+                    );
+                }
+                _ => {}
+            }
+        }
 
         Err(ActrCliError::command_error(error_msg))
     }
@@ -566,8 +585,15 @@ impl SwiftGenerator {
                     ))
                 })?;
 
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let combined_output = format!("{stdout}{stderr}");
+            if combined_output.contains("Warning:") {
+                let highlighted_output = colorize_warning_output(combined_output.trim());
+                eprintln!("{highlighted_output}");
+            }
+
             if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
                 warn!(
                     "swift-protobuf installation via Homebrew failed, please install manually.\n{}",
                     stderr
@@ -585,16 +611,105 @@ impl SwiftGenerator {
         Ok(())
     }
 
+    /// Best-effort automatic installation for protoc.
+    ///
+    /// On macOS with Homebrew available this will run:
+    ///   brew install protobuf
+    fn try_install_protoc(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        {
+            if !command_exists("brew") {
+                debug!("Homebrew not found; skipping automatic protoc installation");
+                return Ok(());
+            }
+
+            info!("📦 Installing protobuf via Homebrew (for protoc)...");
+            let output = StdCommand::new("brew")
+                .arg("install")
+                .arg("protobuf")
+                .output()
+                .map_err(|e| {
+                    ActrCliError::command_error(format!(
+                        "Failed to run Homebrew for protobuf installation: {e}"
+                    ))
+                })?;
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let combined_output = format!("{stdout}{stderr}");
+            if combined_output.contains("Warning:") {
+                let highlighted_output = colorize_warning_output(combined_output.trim());
+                eprintln!("{highlighted_output}");
+            }
+
+            if !output.status.success() {
+                warn!(
+                    "protobuf installation via Homebrew failed, please install manually.\n{}",
+                    stderr
+                );
+            } else {
+                info!("✅ protobuf installation completed");
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            debug!("Automatic protoc installation is only supported on macOS (Homebrew)");
+        }
+
+        Ok(())
+    }
+
     /// Best-effort automatic installation hook for protoc-gen-actrframework-swift.
     ///
-    /// Currently we do not know a standardized installation command for this
-    /// plugin, so this function only serves as an extension point and logs a
-    /// helpful message. The actual failure is surfaced by ensure_required_tools.
+    /// On macOS with Homebrew available this will run:
+    ///   brew install protoc-gen-actrframework-swift
     fn try_install_actrframework_swift_plugin(&self) -> Result<()> {
-        warn!(
-            "Automatic installation for protoc-gen-actrframework-swift is not configured.\n\
-             Please install the plugin following the Actr Swift documentation."
-        );
+        #[cfg(target_os = "macos")]
+        {
+            if !command_exists("brew") {
+                debug!(
+                    "Homebrew not found; skipping Homebrew installation for protoc-gen-actrframework-swift"
+                );
+                return Ok(());
+            }
+
+            info!("📦 Installing protoc-gen-actrframework-swift via Homebrew...");
+            let output = StdCommand::new("brew")
+                .arg("install")
+                .arg("protoc-gen-actrframework-swift")
+                .output()
+                .map_err(|e| {
+                    ActrCliError::command_error(format!(
+                        "Failed to run Homebrew for protoc-gen-actrframework-swift installation: {e}"
+                    ))
+                })?;
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let combined_output = format!("{stdout}{stderr}");
+            if combined_output.contains("Warning:") {
+                let highlighted_output = colorize_warning_output(combined_output.trim());
+                eprintln!("{highlighted_output}");
+            }
+
+            if !output.status.success() {
+                warn!(
+                    "Homebrew installation for protoc-gen-actrframework-swift failed, please install manually.\n{}",
+                    stderr
+                );
+            } else {
+                info!("✅ protoc-gen-actrframework-swift installation completed");
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            debug!(
+                "Automatic installation for protoc-gen-actrframework-swift is only supported on macOS (Homebrew/workspace build)"
+            );
+        }
+
         Ok(())
     }
 

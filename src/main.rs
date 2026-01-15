@@ -5,6 +5,7 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use owo_colors::OwoColorize;
 use std::sync::Arc;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -109,7 +110,7 @@ async fn main() -> Result<()> {
                 println!("Generated {} files", gen_result.generated_files.len());
             }
             actr_cli::core::CommandResult::Error(error) => {
-                eprintln!("❌ {error}");
+                eprintln!("{} {error}", "❌".red());
                 std::process::exit(1);
             }
         },
@@ -122,7 +123,7 @@ async fn main() -> Result<()> {
                 }
                 eprintln!("{}", ErrorReporter::format_error(cli_error));
             } else {
-                eprintln!("Error: {e:?}");
+                eprintln!("{} {e:?}", "Error:".red());
             }
             std::process::exit(1);
         }

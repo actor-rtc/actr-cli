@@ -144,7 +144,7 @@ impl KotlinGenerator {
             .and_then(|l| {
                 let trimmed = l.trim();
                 let after_service = trimmed.strip_prefix("service ")?;
-                let name_end = after_service.find(|c: char| c == ' ' || c == '{')?;
+                let name_end = after_service.find([' ', '{'])?;
                 Some(after_service[..name_end].trim().to_string())
             })
             .unwrap_or_else(|| {

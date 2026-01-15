@@ -50,6 +50,7 @@ tokio = { version = "1.48.0", features = ["full"] }
 # Logging
 tracing = "0.1.43"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+owo-colors = "4.1.0"
 
 # HTTP client for proto dependencies
 reqwest = { version = "0.12.24", features = ["stream"] }
