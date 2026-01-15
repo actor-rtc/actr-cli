@@ -60,13 +60,22 @@ val copyLockFile = tasks.register<Copy>("copyLockFile") {
     into("src/main/assets")
 }
 
+// Copy Actr.toml to assets for runtime configuration
+val copyActrConfig = tasks.register<Copy>("copyActrConfig") {
+    from("${rootProject.projectDir}/Actr.toml")
+    into("src/main/assets")
+}
+
 // Make proto generation depend on copyProtos
 afterEvaluate {
     tasks.matching { it.name.startsWith("generateProto") || it.name.startsWith("extractProto") }
         .configureEach { dependsOn(copyProtos) }
-    // Make compile tasks depend on copyLockFile  
+    // Make compile tasks depend on copyLockFile and copyActrConfig
     tasks.matching { it.name.startsWith("merge") && it.name.contains("Assets") }
-        .configureEach { dependsOn(copyLockFile) }
+        .configureEach {
+            dependsOn(copyLockFile)
+            dependsOn(copyActrConfig)
+        }
 }
 
 dependencies {

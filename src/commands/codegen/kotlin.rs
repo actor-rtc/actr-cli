@@ -75,7 +75,9 @@ impl KotlinGenerator {
              1. Build from source (recommended):\n\
                 git clone https://github.com/actor-rtc/framework-codegen-kotlin.git\n\
                 cd framework-codegen-kotlin\n\
+                gradle wrapper --gradle-version 8.5\n\
                 ./gradlew installDist\n\
+                ./gradlew protocPluginJar\n\
                 export PATH=\"$PWD/build/install/protoc-gen-actrframework-kotlin/bin:$PATH\"\n\n\
              2. Set environment variable (if already built):\n\
                 export ACTR_KOTLIN_PLUGIN_PATH=/path/to/protoc-gen-actrframework-kotlin\n\n\

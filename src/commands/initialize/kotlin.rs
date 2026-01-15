@@ -107,11 +107,7 @@ impl ProjectInitializer for KotlinInitializer {
                 fixtures_root.join("kotlin/app/src/main/res/layout/activity_main.xml"),
                 app_dir.join("src/main/res/layout/activity_main.xml"),
             ),
-            // Assets
-            (
-                fixtures_root.join("kotlin/app/src/main/assets/actr-config.toml"),
-                app_dir.join("src/main/assets/actr-config.toml"),
-            ),
+            // Assets - Actr.toml and Actr.lock.toml are copied by Gradle tasks
             // Kotlin source files
             (
                 fixtures_root.join("kotlin/app/src/main/java/MainActivity.kt"),
