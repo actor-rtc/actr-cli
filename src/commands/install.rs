@@ -441,9 +441,27 @@ impl InstallCommand {
         let dependency_specs = self.load_dependencies_from_config(context).await?;
 
         if dependency_specs.is_empty() {
-            println!("ℹ️ No dependencies to install");
+            println!("ℹ️ No dependencies configured, generating empty lock file");
+
+            // Generate empty lock file with metadata
+            let install_pipeline = {
+                let mut container = context.container.lock().unwrap();
+                container.get_install_pipeline()?
+            };
+            let project_root = install_pipeline.config_manager().get_project_root();
+            let lock_file_path = project_root.join("Actr.lock.toml");
+
+            let mut lock_file = LockFile::new();
+            lock_file.update_timestamp();
+            lock_file
+                .save_to_file(&lock_file_path)
+                .map_err(|e| ActrCliError::InstallFailed {
+                    reason: format!("Failed to save lock file: {}", e),
+                })?;
+
+            println!("  └─ 🔒 Generated Actr.lock.toml");
             return Ok(CommandResult::Success(
-                "No dependencies to install".to_string(),
+                "Generated empty lock file".to_string(),
             ));
         }
 

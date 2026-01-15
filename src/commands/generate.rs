@@ -165,11 +165,20 @@ impl GenCommand {
             }
             SupportedLanguage::Kotlin => {
                 // Kotlin default: app/src/main/java/{package_path}/generated
+                // Package name follows the pattern: io.actr.{project_name_cleaned}
                 let config = actr_config::ConfigParser::from_file(&self.config).map_err(|e| {
                     ActrCliError::config_error(format!("Failed to parse Actr.toml: {e}"))
                 })?;
-                let package_name = config.package.name.replace("-", ".");
-                let package_path = package_name.replace(".", "/");
+                // Convert project name to valid Android package name
+                // e.g., "my-app" -> "io.actr.myapp"
+                let clean_name: String = config
+                    .package
+                    .name
+                    .chars()
+                    .filter(|c| c.is_alphanumeric())
+                    .collect::<String>()
+                    .to_lowercase();
+                let package_path = format!("io/actr/{}", clean_name);
                 Ok(PathBuf::from(format!(
                     "app/src/main/java/{}/generated",
                     package_path

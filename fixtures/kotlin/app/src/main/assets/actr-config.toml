@@ -13,15 +13,20 @@ license = "Apache-2.0"
 tags = ["dev", "client", "android"]
 
 [dependencies]
+echo-real-server = {}
 
 [system.signaling]
 # For Android emulator, use 10.0.2.2 to reach host machine's localhost
 # For physical device, use the actual server IP address
 url = "{{SIGNALING_URL}}"
 
+[system.webrtc]
+stun_urls = ["stun:{{SIGNALING_HOST}}:3478"]
+turn_urls = ["turn:{{SIGNALING_HOST}}:3478"]
+force_relay = true
+
 [system.deployment]
-# Use the default development realm
-realm = 2281844430
+realm_id = 6
 
 [system.discovery]
 visible = false
@@ -31,11 +36,6 @@ filter_level = "info"
 tracing_enabled = false
 tracing_endpoint = "http://localhost:4317"
 tracing_service_name = "{{PROJECT_NAME}}-client"
-
-[system.webrtc]
-force_relay = true
-stun_urls = ["stun:{{SIGNALING_HOST}}:3478"]
-turn_urls = ["turn:{{SIGNALING_HOST}}:3478"]
 
 # ACL configuration - allow communication with EchoService
 [acl]

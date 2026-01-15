@@ -1,11 +1,28 @@
 use crate::commands::codegen::traits::{GenContext, LanguageGenerator};
 use crate::error::{ActrCliError, Result};
+use actr_config::LockFile;
 use async_trait::async_trait;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command as StdCommand;
 use tracing::{debug, info, warn};
 
 pub struct KotlinGenerator;
+
+/// Information about a proto service
+#[derive(Debug, Clone)]
+struct ServiceInfo {
+    /// Service name (e.g., "EchoService", "FileTransferService")
+    service_name: String,
+    /// Proto package (e.g., "echo", "file_transfer")
+    proto_package: String,
+    /// Proto file name (e.g., "echo.proto")
+    proto_file_name: String,
+    /// Whether this is a local service (vs remote)
+    is_local: bool,
+    /// Remote target actor type (only for remote services)
+    remote_target_type: Option<String>,
+}
 
 impl KotlinGenerator {
     /// Find the framework-codegen-kotlin plugin
@@ -85,6 +102,436 @@ impl KotlinGenerator {
         debug!("get_kotlin_package: using fallback com.example.generated");
         "com.example.generated".to_string()
     }
+
+    /// Analyze proto file to determine if it's local or remote
+    /// Convention: files under "local/" are local, files under "remote/" are remote
+    ///
+    /// Now reads actr_type from Actr.lock.toml instead of inferring from directory names.
+    fn analyze_proto_file(
+        &self,
+        proto_path: &PathBuf,
+        actr_type_map: &HashMap<String, String>,
+    ) -> ServiceInfo {
+        let path_str = proto_path.to_string_lossy();
+        let is_local = path_str.contains("/local/");
+
+        // Get directory name for remote services to look up in lock file
+        let dir_name = proto_path
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .map(|s| s.to_string());
+
+        // Get actr_type from lock file mapping (for remote services)
+        let remote_target_type = if !is_local {
+            if let Some(ref dir) = dir_name {
+                actr_type_map.get(dir).cloned()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Read service name from proto file directly
+        let proto_content = std::fs::read_to_string(proto_path).unwrap_or_default();
+
+        // Extract service name from proto file
+        // Look for "service ServiceName {"
+        let service_name = proto_content
+            .lines()
+            .find(|l| l.trim().starts_with("service ") && l.contains("{"))
+            .and_then(|l| {
+                let trimmed = l.trim();
+                let after_service = trimmed.strip_prefix("service ")?;
+                let name_end = after_service.find(|c: char| c == ' ' || c == '{')?;
+                Some(after_service[..name_end].trim().to_string())
+            })
+            .unwrap_or_else(|| {
+                let file_stem = proto_path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown");
+                to_pascal_case(file_stem) + "Service"
+            });
+
+        // Read proto package from the proto file
+        let proto_package = proto_content
+            .lines()
+            .find(|l| l.starts_with("package "))
+            .and_then(|l| l.strip_prefix("package "))
+            .and_then(|l| l.strip_suffix(";"))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|| {
+                let file_stem = proto_path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown");
+                file_stem.to_lowercase().replace('-', "_")
+            });
+
+        let proto_file_name = proto_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown.proto")
+            .to_string();
+
+        debug!(
+            "analyze_proto_file: {} -> service={}, package={}, is_local={}, remote_target_type={:?}",
+            proto_path.display(),
+            service_name,
+            proto_package,
+            is_local,
+            remote_target_type
+        );
+
+        ServiceInfo {
+            service_name,
+            proto_package,
+            proto_file_name,
+            is_local,
+            remote_target_type,
+        }
+    }
+
+    /// Load Actr.lock.toml and build a mapping from dependency name to actr_type
+    /// Returns a HashMap where key is the dependency name (e.g., "echo-real-server")
+    /// and value is the actr_type (e.g., "EchoService")
+    fn load_actr_type_map(&self, context: &GenContext) -> Result<HashMap<String, String>> {
+        // Find project root by looking for Actr.lock.toml relative to input path
+        // The input path is typically "protos" or a similar directory
+        let project_root = context.input_path.parent().unwrap_or(&context.input_path);
+        let lock_file_path = project_root.join("Actr.lock.toml");
+
+        debug!(
+            "load_actr_type_map: looking for lock file at {:?}",
+            lock_file_path
+        );
+
+        if !lock_file_path.exists() {
+            return Err(ActrCliError::config_error(format!(
+                "Actr.lock.toml not found at {:?}.\n\
+                 Please run 'actr install' first to generate the lock file.",
+                lock_file_path
+            )));
+        }
+
+        let lock_file = LockFile::from_file(&lock_file_path).map_err(|e| {
+            ActrCliError::config_error(format!(
+                "Failed to parse Actr.lock.toml: {}\n\
+                 Please run 'actr install' to regenerate the lock file.",
+                e
+            ))
+        })?;
+
+        // Build the mapping: dependency name -> actr_type (converted to service name format)
+        let mut map = HashMap::new();
+        for dep in &lock_file.dependencies {
+            // actr_type is in format "acme+EchoService", extract the service name part
+            let actr_type = &dep.actr_type;
+            let service_name = if let Some(pos) = actr_type.find('+') {
+                actr_type[pos + 1..].to_string()
+            } else {
+                actr_type.clone()
+            };
+
+            debug!(
+                "load_actr_type_map: {} -> {} (from actr_type: {})",
+                dep.name, service_name, dep.actr_type
+            );
+            map.insert(dep.name.clone(), service_name);
+        }
+
+        info!("📦 Loaded {} dependencies from Actr.lock.toml", map.len());
+        Ok(map)
+    }
+
+    /// Collect all service information from proto files
+    fn collect_services(&self, context: &GenContext) -> Result<Vec<ServiceInfo>> {
+        let actr_type_map = self.load_actr_type_map(context)?;
+
+        Ok(context
+            .proto_files
+            .iter()
+            .map(|p| self.analyze_proto_file(p, &actr_type_map))
+            .collect())
+    }
+
+    /// Generate unified infrastructure code
+    fn generate_unified_infrastructure(
+        &self,
+        services: &[ServiceInfo],
+        kotlin_package: &str,
+    ) -> String {
+        let local_services: Vec<_> = services.iter().filter(|s| s.is_local).collect();
+        let remote_services: Vec<_> = services.iter().filter(|s| !s.is_local).collect();
+
+        let mut code = String::new();
+
+        // Header
+        code.push_str(&format!(
+            r#"/**
+ * Auto-generated Unified Actor Code - DO NOT EDIT
+ *
+ * Generated by actr gen command
+ *
+ * This file contains:
+ * - UnifiedHandler interface combining all local service handlers
+ * - UnifiedDispatcher for routing requests to local handlers or remote services
+ *
+ * Local services: {local_count}
+ * Remote services: {remote_count}
+ */
+package {kotlin_package}
+
+import io.actor_rtc.actr.ActrId
+import io.actor_rtc.actr.ActrType
+import io.actor_rtc.actr.ContextBridge
+import io.actor_rtc.actr.PayloadType
+import io.actor_rtc.actr.RpcEnvelopeBridge
+
+"#,
+            local_count = local_services.len(),
+            remote_count = remote_services.len(),
+            kotlin_package = kotlin_package,
+        ));
+
+        // Import protobuf message types for all services
+        code.push_str("// Import protobuf message types\n");
+        for service in services {
+            let outer_class = to_pascal_case(&service.proto_file_name.replace(".proto", ""));
+            code.push_str(&format!(
+                "import {}.{}.*\n",
+                service.proto_package, outer_class
+            ));
+        }
+        code.push('\n');
+
+        // Import individual service handlers and dispatchers
+        for service in &local_services {
+            code.push_str(&format!(
+                "// Local service\nimport {}.{}Handler\nimport {}.{}Dispatcher\n",
+                kotlin_package, service.service_name, kotlin_package, service.service_name
+            ));
+        }
+        code.push('\n');
+
+        // Generate UnifiedHandler interface (only for local services)
+        if !local_services.is_empty() {
+            code.push_str(&self.generate_unified_handler(&local_services));
+            code.push('\n');
+        }
+
+        // Generate RemoteServiceRegistry for remote service discovery
+        if !remote_services.is_empty() {
+            code.push_str(&self.generate_remote_service_registry(&remote_services));
+            code.push('\n');
+        }
+
+        // Generate UnifiedDispatcher
+        code.push_str(&self.generate_unified_dispatcher(&local_services, &remote_services));
+
+        code
+    }
+
+    /// Generate UnifiedHandler interface
+    fn generate_unified_handler(&self, local_services: &[&ServiceInfo]) -> String {
+        let handler_extends: Vec<_> = local_services
+            .iter()
+            .map(|s| format!("{}Handler", s.service_name))
+            .collect();
+
+        format!(
+            r#"/**
+ * Unified Handler interface combining all local service handlers
+ *
+ * Implement this interface to provide your business logic for all local services.
+ */
+interface UnifiedHandler : {} {{
+    // All methods are inherited from individual service handlers
+}}
+"#,
+            handler_extends.join(", ")
+        )
+    }
+
+    /// Generate RemoteServiceRegistry for managing remote service discovery
+    fn generate_remote_service_registry(&self, remote_services: &[&ServiceInfo]) -> String {
+        let mut code = String::new();
+
+        code.push_str(
+            r#"/**
+ * Remote Service Route prefixes and their corresponding actor types
+ *
+ * Used by UnifiedDispatcher to route requests to remote services.
+ */
+object RemoteServiceRegistry {
+    /**
+     * Map of route key prefix to actor type for remote services
+     */
+    val remoteRoutes: Map<String, ActrType> = mapOf(
+"#,
+        );
+
+        for service in remote_services {
+            let actor_type = service
+                .remote_target_type
+                .as_ref()
+                .unwrap_or(&service.service_name);
+            // Extract service base name without "Service" suffix for route key
+            let service_base = service.service_name.replace("Service", "");
+            code.push_str(&format!(
+                "        \"{}.{}\" to ActrType(manufacturer = \"acme\", name = \"{}\"),\n",
+                service.proto_package, service_base, actor_type
+            ));
+        }
+
+        code.push_str(
+            r#"    )
+
+    /**
+     * Check if a route key belongs to a remote service
+     */
+    fun isRemoteRoute(routeKey: String): Boolean {
+        return remoteRoutes.keys.any { routeKey.startsWith(it) }
+    }
+
+    /**
+     * Get the actor type for a remote route
+     */
+    fun getActorType(routeKey: String): ActrType? {
+        return remoteRoutes.entries.find { routeKey.startsWith(it.key) }?.value
+    }
+}
+"#,
+        );
+
+        code
+    }
+
+    /// Generate UnifiedDispatcher
+    fn generate_unified_dispatcher(
+        &self,
+        local_services: &[&ServiceInfo],
+        remote_services: &[&ServiceInfo],
+    ) -> String {
+        let mut local_dispatch_cases = String::new();
+        for service in local_services {
+            let service_base = service.service_name.replace("Service", "");
+            local_dispatch_cases.push_str(&format!(
+                r#"            // Local: {service_name}
+            routeKey.startsWith("{proto_package}.{service_base}") -> {{
+                {service_name}Dispatcher.dispatch(handler, ctx, envelope)
+            }}
+"#,
+                service_name = service.service_name,
+                proto_package = service.proto_package,
+                service_base = service_base,
+            ));
+        }
+
+        let has_remote = !remote_services.is_empty();
+        let has_local = !local_services.is_empty();
+
+        let handler_param = if has_local {
+            "handler: UnifiedHandler,\n        "
+        } else {
+            ""
+        };
+
+        let remote_dispatch = if has_remote {
+            r#"
+            // Check if this is a remote service call
+            RemoteServiceRegistry.isRemoteRoute(routeKey) -> {
+                // Get target actor type and discover it
+                val actorType = RemoteServiceRegistry.getActorType(routeKey)
+                    ?: throw IllegalArgumentException("Unknown remote route: $routeKey")
+
+                // Discover remote actor
+                val targetId = discoveredActors[actorType]
+                    ?: throw IllegalStateException("Remote actor not discovered: ${actorType.name}. Call discoverRemoteServices() first.")
+
+                // Forward to remote actor
+                ctx.callRaw(
+                    targetId,
+                    routeKey,
+                    PayloadType.RPC_RELIABLE,
+                    envelope.payload,
+                    30000L
+                )
+            }
+"#
+        } else {
+            ""
+        };
+
+        let discovered_actors_field = if has_remote {
+            r#"
+    // Cache for discovered remote actors
+    private val discoveredActors = mutableMapOf<ActrType, ActrId>()
+
+    /**
+     * Discover all remote services
+     *
+     * Call this in your Workload's onStart method to pre-discover remote actors.
+     */
+    suspend fun discoverRemoteServices(ctx: ContextBridge) {
+        for ((_, actorType) in RemoteServiceRegistry.remoteRoutes) {
+            if (!discoveredActors.containsKey(actorType)) {
+                val actorId = ctx.discover(actorType)
+                discoveredActors[actorType] = actorId
+            }
+        }
+    }
+
+    /**
+     * Clear discovered actors cache
+     */
+    fun clearDiscoveredActors() {
+        discoveredActors.clear()
+    }
+"#
+        } else {
+            ""
+        };
+
+        format!(
+            r#"/**
+ * Unified Dispatcher for routing requests
+ *
+ * Routes requests to:
+ * - Local service handlers for local routes
+ * - Remote actors via RPC for remote routes
+ */
+object UnifiedDispatcher {{
+{discovered_actors_field}
+    /**
+     * Dispatch an RPC envelope to the appropriate handler or remote service
+     *
+     * @param handler The unified handler implementation (for local services)
+     * @param ctx The context bridge for making remote calls
+     * @param envelope The RPC envelope containing the request
+     * @return The serialized response bytes
+     */
+    suspend fun dispatch(
+        {handler_param}ctx: ContextBridge,
+        envelope: RpcEnvelopeBridge
+    ): ByteArray {{
+        val routeKey = envelope.routeKey
+
+        return when {{
+{local_dispatch_cases}{remote_dispatch}
+            else -> throw IllegalArgumentException("Unknown route key: $routeKey")
+        }}
+    }}
+}}
+"#,
+            discovered_actors_field = discovered_actors_field,
+            handler_param = handler_param,
+            local_dispatch_cases = local_dispatch_cases,
+            remote_dispatch = remote_dispatch,
+        )
+    }
 }
 
 #[async_trait]
@@ -99,6 +546,7 @@ impl LanguageGenerator for KotlinGenerator {
         let kotlin_package = self.get_kotlin_package(context);
         let mut generated_files = Vec::new();
 
+        // Generate per-service Handler and Dispatcher files FIRST
         for proto_file in &context.proto_files {
             debug!("Processing proto file: {:?}", proto_file);
 
@@ -146,12 +594,25 @@ impl LanguageGenerator for KotlinGenerator {
             if generated_file.exists() {
                 generated_files.push(generated_file);
             }
-
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            if !stdout.is_empty() {
-                debug!("protoc output: {}", stdout);
-            }
         }
+
+        // NOW collect service info (after per-service files are generated)
+        let services = self.collect_services(context)?;
+        info!(
+            "📊 Found {} services ({} local, {} remote)",
+            services.len(),
+            services.iter().filter(|s| s.is_local).count(),
+            services.iter().filter(|s| !s.is_local).count()
+        );
+
+        // Generate unified infrastructure file
+        let unified_code = self.generate_unified_infrastructure(&services, &kotlin_package);
+        let unified_file = context.output.join("unified_actor.kt");
+        std::fs::write(&unified_file, &unified_code).map_err(|e| {
+            ActrCliError::config_error(format!("Failed to write unified_actor.kt: {e}"))
+        })?;
+        generated_files.push(unified_file);
+        info!("📄 Generated unified_actor.kt");
 
         info!(
             "✅ Generated {} Kotlin infrastructure files",
@@ -161,8 +622,6 @@ impl LanguageGenerator for KotlinGenerator {
     }
 
     async fn generate_scaffold(&self, context: &GenContext) -> Result<Vec<PathBuf>> {
-        use crate::commands::codegen::traits::ScaffoldType;
-
         if context.no_scaffold {
             return Ok(vec![]);
         }
@@ -171,80 +630,36 @@ impl LanguageGenerator for KotlinGenerator {
 
         let mut generated_files = Vec::new();
         let kotlin_package = self.get_kotlin_package(context);
+        let services = self.collect_services(context)?;
 
-        for proto_file in &context.proto_files {
-            let service_name = proto_file
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("unknown");
+        let output_dir = context.output.parent().unwrap_or(&context.output);
 
-            let pascal_name = to_pascal_case(service_name);
-            let output_dir = context.output.parent().unwrap_or(&context.output);
+        // Generate unified workload
+        let unified_workload_file = output_dir.join("UnifiedWorkload.kt");
+        if !unified_workload_file.exists() || context.overwrite_user_code {
+            let unified_workload_content =
+                generate_unified_workload_scaffold(&services, &kotlin_package);
+            std::fs::write(&unified_workload_file, &unified_workload_content).map_err(|e| {
+                ActrCliError::config_error(format!("Failed to write UnifiedWorkload.kt: {e}"))
+            })?;
+            info!("📄 Generated UnifiedWorkload.kt");
+            generated_files.push(unified_workload_file);
+        } else {
+            info!("⏭️  Skipping existing UnifiedWorkload.kt");
+        }
 
-            // Always generate both server and client scaffolds
-            let scaffold_type = ScaffoldType::Both;
-
-            // Generate server-side scaffold if requested
-            if matches!(scaffold_type, ScaffoldType::Server | ScaffoldType::Both) {
-                // Generate Handler implementation (My{ServiceName}.kt)
-                let handler_file = output_dir.join(format!("My{}.kt", pascal_name));
-
-                if !handler_file.exists() || context.overwrite_user_code {
-                    let handler_content =
-                        generate_kotlin_handler_scaffold(service_name, &kotlin_package);
-                    std::fs::write(&handler_file, handler_content).map_err(|e| {
-                        ActrCliError::config_error(format!("Failed to write handler file: {e}"))
-                    })?;
-                    info!("📄 Generated server handler scaffold: {:?}", handler_file);
-                    generated_files.push(handler_file);
-                } else {
-                    info!("⏭️  Skipping existing handler file: {:?}", handler_file);
-                }
-
-                // Generate Workload class ({ServiceName}Workload.kt)
-                let workload_file = output_dir.join(format!("{}Workload.kt", pascal_name));
-
-                if !workload_file.exists() || context.overwrite_user_code {
-                    let workload_content =
-                        generate_kotlin_workload_scaffold(service_name, &kotlin_package);
-                    std::fs::write(&workload_file, workload_content).map_err(|e| {
-                        ActrCliError::config_error(format!("Failed to write workload file: {e}"))
-                    })?;
-                    info!("📄 Generated server workload scaffold: {:?}", workload_file);
-                    generated_files.push(workload_file);
-                } else {
-                    info!("⏭️  Skipping existing workload file: {:?}", workload_file);
-                }
-            }
-
-            // Generate client-side scaffold if requested
-            if matches!(scaffold_type, ScaffoldType::Client | ScaffoldType::Both) {
-                // Generate Client Workload ({ServiceName}ClientWorkload.kt)
-                let client_workload_file =
-                    output_dir.join(format!("{}ClientWorkload.kt", pascal_name));
-
-                if !client_workload_file.exists() || context.overwrite_user_code {
-                    let client_workload_content =
-                        generate_kotlin_client_workload_scaffold(service_name, &kotlin_package);
-                    std::fs::write(&client_workload_file, client_workload_content).map_err(
-                        |e| {
-                            ActrCliError::config_error(format!(
-                                "Failed to write client workload file: {e}"
-                            ))
-                        },
-                    )?;
-                    info!(
-                        "📄 Generated client workload scaffold: {:?}",
-                        client_workload_file
-                    );
-                    generated_files.push(client_workload_file);
-                } else {
-                    info!(
-                        "⏭️  Skipping existing client workload file: {:?}",
-                        client_workload_file
-                    );
-                }
-            }
+        // Generate unified handler implementation
+        let unified_handler_file = output_dir.join("MyUnifiedHandler.kt");
+        if !unified_handler_file.exists() || context.overwrite_user_code {
+            let unified_handler_content =
+                generate_unified_handler_scaffold(&services, &kotlin_package);
+            std::fs::write(&unified_handler_file, &unified_handler_content).map_err(|e| {
+                ActrCliError::config_error(format!("Failed to write MyUnifiedHandler.kt: {e}"))
+            })?;
+            info!("📄 Generated MyUnifiedHandler.kt");
+            generated_files.push(unified_handler_file);
+        } else {
+            info!("⏭️  Skipping existing MyUnifiedHandler.kt");
         }
 
         Ok(generated_files)
@@ -302,7 +717,6 @@ impl LanguageGenerator for KotlinGenerator {
         }
 
         // Note: Full compilation validation would require a Kotlin compiler setup
-        // For now, we just check that files were generated
         info!("💡 For full validation, compile the Kotlin project with gradle/kotlinc");
 
         Ok(())
@@ -312,20 +726,20 @@ impl LanguageGenerator for KotlinGenerator {
         println!("\n🎉 Kotlin code generation completed!");
         println!("\n📋 Next steps:");
         println!("1. 📖 View generated code: {:?}", context.output);
-        println!("2. 📚 Copy generated files to your Android/Kotlin project");
-        println!("3. 📦 Ensure protobuf gradle plugin is configured for message classes");
-        println!("4. ✏️  Implement the Handler interface in your service class");
+        println!("2. 📦 Ensure protobuf gradle plugin is configured for message classes");
+        println!("3. ✏️  Implement MyUnifiedHandler with your business logic");
+        println!("4. 🚀 Use UnifiedWorkload in your app");
         println!("5. 🏗️  Build project: ./gradlew build");
-        println!("6. 🧪 Run tests: ./gradlew test");
+        println!("6. 🧪 Run tests: ./gradlew connectedAndroidTest");
         println!(
-            "\n💡 Tip: The generated Handler interface and Dispatcher work with protobuf-generated message classes"
+            "\n💡 Tip: The UnifiedDispatcher routes local requests to your handler and remote requests via RPC"
         );
     }
 }
 
 /// Convert a string to PascalCase
 fn to_pascal_case(s: &str) -> String {
-    s.split('_')
+    s.split(['_', '-'])
         .map(|word| {
             let mut chars = word.chars();
             match chars.next() {
@@ -336,90 +750,51 @@ fn to_pascal_case(s: &str) -> String {
         .collect()
 }
 
-/// Generate Kotlin Handler implementation scaffold
-fn generate_kotlin_handler_scaffold(service_name: &str, kotlin_package: &str) -> String {
-    let pascal_name = to_pascal_case(service_name);
-    // Derive proto package from service name (e.g., "echo" for EchoService)
-    let proto_package = service_name.to_lowercase();
-    // Derive outer class name (e.g., "Echo" from "echo.proto")
-    let outer_class = to_pascal_case(service_name);
-
-    // Base package is kotlin_package without trailing ".generated" if present
+/// Generate unified workload scaffold
+fn generate_unified_workload_scaffold(services: &[ServiceInfo], kotlin_package: &str) -> String {
     let base_package = kotlin_package
         .strip_suffix(".generated")
         .unwrap_or(kotlin_package);
 
+    let has_local = services.iter().any(|s| s.is_local);
+    let has_remote = services.iter().any(|s| !s.is_local);
+
+    let handler_field = if has_local {
+        "private val handler: UnifiedHandler,"
+    } else {
+        ""
+    };
+
+    let handler_import = if has_local {
+        format!("\nimport {}.UnifiedHandler", kotlin_package)
+    } else {
+        String::new()
+    };
+
+    let discover_call = if has_remote {
+        r#"
+        // Discover all remote services
+        Log.i(TAG, "📡 Discovering remote services...")
+        UnifiedDispatcher.discoverRemoteServices(ctx)
+        Log.i(TAG, "✅ Remote services discovered")"#
+    } else {
+        ""
+    };
+
+    let dispatch_handler = if has_local { "handler, " } else { "" };
+
     format!(
         r#"/**
- * {pascal_name} User Business Logic Implementation
+ * Unified Workload for all services
  *
- * This file is a scaffold generated by the actr gen command.
- * Implement your specific business logic here.
+ * This Workload handles both local and remote service requests using the UnifiedDispatcher.
+ * Local requests are routed to your UnifiedHandler implementation.
+ * Remote requests are forwarded to discovered remote actors.
  */
 package {base_package}
 
 import android.util.Log
-import {kotlin_package}.{pascal_name}ServiceHandler
-import io.actor_rtc.actr.ContextBridge
-import {proto_package}.{outer_class}.*
-
-/**
- * Implementation of {pascal_name}ServiceHandler
- *
- * This class handles incoming RPC requests for the {pascal_name} service.
- */
-class My{pascal_name}Service : {pascal_name}ServiceHandler {{
-
-    companion object {{
-        private const val TAG = "My{pascal_name}Service"
-    }}
-
-    /**
-     * Handle Echo RPC request
-     * 
-     * @param request The incoming EchoRequest
-     * @param ctx Context for making RPC calls to other services
-     * @return EchoResponse with the echoed message
-     */
-    override suspend fun echo(request: {pascal_name}Request, ctx: ContextBridge): {pascal_name}Response {{
-        val message = request.message
-        Log.i(TAG, "📥 Received echo request: $message")
-        
-        // Create response with "Echo: " prefix
-        val response = {pascal_name}Response.newBuilder()
-            .setReply("Echo: $message")
-            .setTimestamp(System.currentTimeMillis().toULong().toLong())
-            .build()
-        
-        Log.i(TAG, "📤 Sending response: ${{response.reply}}")
-        return response
-    }}
-}}
-"#
-    )
-}
-
-/// Generate Kotlin Workload scaffold
-fn generate_kotlin_workload_scaffold(service_name: &str, kotlin_package: &str) -> String {
-    let pascal_name = to_pascal_case(service_name);
-
-    // Base package is kotlin_package without trailing ".generated" if present
-    let base_package = kotlin_package
-        .strip_suffix(".generated")
-        .unwrap_or(kotlin_package);
-
-    format!(
-        r#"/**
- * {pascal_name}Service Workload Implementation
- *
- * This Workload uses the generated Dispatcher for message routing,
- * delegating business logic to the {pascal_name}ServiceHandler implementation.
- */
-package {base_package}
-
-import android.util.Log
-import {kotlin_package}.{pascal_name}ServiceDispatcher
-import {kotlin_package}.{pascal_name}ServiceHandler
+import {kotlin_package}.UnifiedDispatcher{handler_import}
 import io.actor_rtc.actr.ActrId
 import io.actor_rtc.actr.ActrType
 import io.actor_rtc.actr.ContextBridge
@@ -428,46 +803,52 @@ import io.actor_rtc.actr.RpcEnvelopeBridge
 import io.actor_rtc.actr.WorkloadBridge
 
 /**
- * Workload for {pascal_name}Service
+ * Unified Workload
  *
  * Usage:
  * ```kotlin
- * val handler = My{pascal_name}Service()
- * val workload = {pascal_name}ServiceWorkload(handler)
+ * val handler = MyUnifiedHandler()
+ * val workload = UnifiedWorkload(handler)
  * val system = createActrSystem(configPath)
  * val node = system.attach(workload)
  * val actrRef = node.start()
+ *
+ * // Wait for remote service discovery
+ * delay(2000)
+ *
+ * // Make local or remote RPC calls
+ * val response = actrRef.call("route.key", PayloadType.RPC_RELIABLE, payload, 30000L)
  * ```
  */
-class {pascal_name}ServiceWorkload(
-    private val handler: {pascal_name}ServiceHandler,
+class UnifiedWorkload(
+    {handler_field}
     private val realmId: UInt = 2281844430u
 ) : WorkloadBridge {{
 
     companion object {{
-        private const val TAG = "{pascal_name}ServiceWorkload"
+        private const val TAG = "UnifiedWorkload"
     }}
 
     private val selfId = ActrId(
         realm = Realm(realmId = realmId),
         serialNumber = System.currentTimeMillis().toULong(),
-        type = ActrType(manufacturer = "acme", name = "{pascal_name}Service")
+        type = ActrType(manufacturer = "acme", name = "UnifiedActor")
     )
 
     override suspend fun onStart(ctx: ContextBridge) {{
-        Log.i(TAG, "{pascal_name}ServiceWorkload.onStart")
-        // Initialize resources, discover remote services, etc.
+        Log.i(TAG, "UnifiedWorkload.onStart"){discover_call}
     }}
 
     override suspend fun onStop(ctx: ContextBridge) {{
-        Log.i(TAG, "{pascal_name}ServiceWorkload.onStop")
-        // Cleanup resources
+        Log.i(TAG, "UnifiedWorkload.onStop")
     }}
 
     /**
-     * Dispatch RPC requests to the handler
+     * Dispatch RPC requests
      *
-     * Uses the generated Dispatcher to route requests to the appropriate handler method
+     * Uses the UnifiedDispatcher to route requests to:
+     * - Local handler methods for local service routes
+     * - Remote actors for remote service routes
      */
     override suspend fun dispatch(ctx: ContextBridge, envelope: RpcEnvelopeBridge): ByteArray {{
         Log.i(TAG, "🔀 dispatch() called")
@@ -475,147 +856,97 @@ class {pascal_name}ServiceWorkload(
         Log.i(TAG, "   request_id: ${{envelope.requestId}}")
         Log.i(TAG, "   payload size: ${{envelope.payload.size}} bytes")
 
-        return {pascal_name}ServiceDispatcher.dispatch(handler, ctx, envelope)
+        return UnifiedDispatcher.dispatch({dispatch_handler}ctx, envelope)
     }}
 }}
-"#
+"#,
+        base_package = base_package,
+        kotlin_package = kotlin_package,
+        handler_import = handler_import,
+        handler_field = handler_field,
+        discover_call = discover_call,
+        dispatch_handler = dispatch_handler,
     )
 }
 
-/// Generate Kotlin Client Workload scaffold
-fn generate_kotlin_client_workload_scaffold(service_name: &str, kotlin_package: &str) -> String {
-    let pascal_name = to_pascal_case(service_name);
-
-    // Base package is kotlin_package without trailing ".generated" if present
+/// Generate unified handler implementation scaffold
+fn generate_unified_handler_scaffold(services: &[ServiceInfo], kotlin_package: &str) -> String {
     let base_package = kotlin_package
         .strip_suffix(".generated")
         .unwrap_or(kotlin_package);
 
-    // Proto package (lowercase service name)
-    let proto_package = service_name.to_lowercase();
+    let local_services: Vec<_> = services.iter().filter(|s| s.is_local).collect();
+
+    if local_services.is_empty() {
+        return format!(
+            r#"/**
+ * No local services - this file is a placeholder
+ *
+ * All services are remote and will be handled by the UnifiedDispatcher.
+ */
+package {base_package}
+
+// No local handler needed - all services are remote
+"#,
+            base_package = base_package,
+        );
+    }
+
+    let mut imports = String::new();
+    let mut method_impls = String::new();
+
+    for service in &local_services {
+        let outer_class = to_pascal_case(&service.proto_file_name.replace(".proto", ""));
+        imports.push_str(&format!(
+            "import {}.{}.*\n",
+            service.proto_package, outer_class
+        ));
+
+        // Generate TODO method stubs based on service type
+        method_impls.push_str(&format!(
+            r#"
+    // ===== {} methods =====
+    // TODO: Implement your business logic for {} methods
+    // Example method (adjust based on your actual proto definition):
+    // override suspend fun your_method(request: YourRequest, ctx: ContextBridge): YourResponse {{
+    //     // Your implementation here
+    // }}
+"#,
+            service.service_name, service.service_name,
+        ));
+    }
 
     format!(
         r#"/**
- * {pascal_name}Service Client Workload Implementation
+ * Unified Handler Implementation
  *
- * This client-side Workload forwards RPC requests to a remote {pascal_name}Service.
- * It uses the generated Handler interface and Dispatcher for type-safe RPC handling.
+ * This file provides the implementation for all local service handlers.
+ * Implement your business logic in this class.
  */
 package {base_package}
 
 import android.util.Log
-import {kotlin_package}.{pascal_name}ServiceDispatcher
-import {kotlin_package}.{pascal_name}ServiceHandler
-import {proto_package}.{pascal_name}.*
-import io.actor_rtc.actr.ActrId
-import io.actor_rtc.actr.ActrType
+import {kotlin_package}.UnifiedHandler
 import io.actor_rtc.actr.ContextBridge
-import io.actor_rtc.actr.PayloadType
-import io.actor_rtc.actr.Realm
-import io.actor_rtc.actr.RpcEnvelopeBridge
-import io.actor_rtc.actr.WorkloadBridge
+{imports}
 
 /**
- * Client-side handler that forwards requests to the remote {pascal_name}Service.
- * This demonstrates using the generated Handler interface for client-side logic.
+ * Implementation of UnifiedHandler
+ *
+ * This class handles all local service requests.
+ * Remote service requests are automatically forwarded by the UnifiedDispatcher.
  */
-class {pascal_name}ClientHandler(
-    private val ctx: ContextBridge,
-    private val serverId: ActrId
-) : {pascal_name}ServiceHandler {{
+class MyUnifiedHandler : UnifiedHandler {{
 
     companion object {{
-        private const val TAG = "{pascal_name}ClientHandler"
+        private const val TAG = "MyUnifiedHandler"
     }}
-
-    override suspend fun echo(request: {pascal_name}Request, ctx: ContextBridge): {pascal_name}Response {{
-        Log.i(TAG, "📤 Forwarding echo request to server: ${{request.message}}")
-
-        // Forward to remote {pascal_name}Service
-        val response = ctx.callRaw(
-            serverId,
-            "{proto_package}.{pascal_name}Service.Echo",
-            PayloadType.RPC_RELIABLE,
-            request.toByteArray(),
-            30000L
-        )
-
-        val echoResponse = {pascal_name}Response.parseFrom(response)
-        Log.i(TAG, "📥 Received response from server: ${{echoResponse.reply}}")
-        return echoResponse
-    }}
+{method_impls}
 }}
-
-/**
- * Client Workload for {pascal_name}Service
- *
- * This Workload:
- * 1. Discovers the remote {pascal_name}Service in onStart
- * 2. Uses EchoServiceDispatcher to route requests to handler
- * 3. Handler forwards requests to the remote server
- *
- * Usage:
- * ```kotlin
- * val workload = {pascal_name}ClientWorkload()
- * val system = createActrSystem(configPath)
- * val node = system.attach(workload)
- * val actrRef = node.start()
- *
- * // Wait for discovery to complete
- * delay(2000)
- *
- * // Make RPC call
- * val request = {pascal_name}Request.newBuilder().setMessage("Hello").build()
- * val response = actrRef.call("{proto_package}.{pascal_name}Service.Echo", PayloadType.RPC_RELIABLE, request.toByteArray(), 30000L)
- * val echoResponse = {pascal_name}Response.parseFrom(response)
- * ```
- */
-class {pascal_name}ClientWorkload(
-    private val realmId: UInt = 2281844430u
-) : WorkloadBridge {{
-
-    companion object {{
-        private const val TAG = "{pascal_name}ClientWorkload"
-    }}
-
-    // Server ID discovered in onStart
-    private var serverId: ActrId? = null
-    private var handler: {pascal_name}ClientHandler? = null
-
-    override suspend fun onStart(ctx: ContextBridge) {{
-        Log.i(TAG, "{pascal_name}ClientWorkload.onStart: Starting...")
-
-        // Pre-discover the {pascal_name}Service
-        Log.i(TAG, "📡 Discovering {pascal_name}Service...")
-        val targetType = ActrType(manufacturer = "acme", name = "{pascal_name}Service")
-        serverId = ctx.discover(targetType)
-        Log.i(TAG, "✅ Found {pascal_name}Service: ${{serverId?.serialNumber}}")
-
-        // Create handler with discovered server ID
-        handler = {pascal_name}ClientHandler(ctx, serverId!!)
-    }}
-
-    override suspend fun onStop(ctx: ContextBridge) {{
-        Log.i(TAG, "{pascal_name}ClientWorkload.onStop")
-        // Cleanup resources
-    }}
-
-    /**
-     * Dispatch RPC requests using the generated Dispatcher
-     */
-    override suspend fun dispatch(ctx: ContextBridge, envelope: RpcEnvelopeBridge): ByteArray {{
-        Log.i(TAG, "🔀 {pascal_name}ClientWorkload.dispatch() called!")
-        Log.i(TAG, "   route_key: ${{envelope.routeKey}}")
-        Log.i(TAG, "   request_id: ${{envelope.requestId}}")
-        Log.i(TAG, "   payload size: ${{envelope.payload.size}} bytes")
-
-        val currentHandler = handler
-            ?: throw IllegalStateException("Handler not initialized - {pascal_name}Service not discovered yet")
-
-        // Use generated Dispatcher to route to handler
-        return {pascal_name}ServiceDispatcher.dispatch(currentHandler, ctx, envelope)
-    }}
-}}
-"#
+"#,
+        base_package = base_package,
+        kotlin_package = kotlin_package,
+        imports = imports,
+        method_impls = method_impls,
     )
 }

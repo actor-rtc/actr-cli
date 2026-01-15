@@ -46,9 +46,32 @@ protobuf {
     }
 }
 
+// Copy proto files from protos/remote to src/main/proto for protobuf plugin
+val copyProtos = tasks.register<Copy>("copyProtos") {
+    from("${rootProject.projectDir}/protos/remote") {
+        include("**/*.proto")
+    }
+    into("src/main/proto")
+}
+
+// Copy Actr.lock.toml to assets for runtime service resolution
+val copyLockFile = tasks.register<Copy>("copyLockFile") {
+    from("${rootProject.projectDir}/Actr.lock.toml")
+    into("src/main/assets")
+}
+
+// Make proto generation depend on copyProtos
+afterEvaluate {
+    tasks.matching { it.name.startsWith("generateProto") || it.name.startsWith("extractProto") }
+        .configureEach { dependsOn(copyProtos) }
+    // Make compile tasks depend on copyLockFile  
+    tasks.matching { it.name.startsWith("merge") && it.name.contains("Assets") }
+        .configureEach { dependsOn(copyLockFile) }
+}
+
 dependencies {
     // actr-kotlin library from JitPack
-    implementation("com.github.actor-rtc:actr-kotlin:37eacf2") {
+    implementation("com.github.actor-rtc:actr-kotlin:089464a") {
         exclude(group = "net.java.dev.jna", module = "jna")
     }
 
