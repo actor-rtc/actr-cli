@@ -26,7 +26,7 @@ turn_urls = ["turn:{{SIGNALING_HOST}}:3478"]
 force_relay = true
 
 [system.deployment]
-realm_id = 6
+realm_id = 2368266035
 
 [system.discovery]
 visible = false
