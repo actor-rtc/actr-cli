@@ -45,7 +45,9 @@ struct ContentView: View {
                 Spacer()
             }
             .padding()
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #endif
         }
         .onAppear {
             guard !isInitialized else { return }

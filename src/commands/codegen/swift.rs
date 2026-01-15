@@ -675,6 +675,24 @@ impl SwiftGenerator {
             }
 
             info!("📦 Installing protoc-gen-actrframework-swift via Homebrew...");
+            let tap_output = StdCommand::new("brew")
+                .arg("tap")
+                .arg("actor-rtc/homebrew-tap")
+                .output()
+                .map_err(|e| {
+                    ActrCliError::command_error(format!(
+                        "Failed to run Homebrew tap for actor-rtc/homebrew-tap: {e}"
+                    ))
+                })?;
+            if !tap_output.status.success() {
+                let stdout = String::from_utf8_lossy(&tap_output.stdout);
+                let stderr = String::from_utf8_lossy(&tap_output.stderr);
+                warn!(
+                    "Homebrew tap for actor-rtc/homebrew-tap failed, please add it manually.\n{}{}",
+                    stdout, stderr
+                );
+            }
+
             let output = StdCommand::new("brew")
                 .arg("install")
                 .arg("protoc-gen-actrframework-swift")
