@@ -24,10 +24,14 @@ impl ProjectInitializer for KotlinInitializer {
         let package_path = package_name.replace('.', "/");
 
         // Extract host from signaling URL (e.g., "ws://10.30.3.206:8081/signaling/ws" -> "10.30.3.206")
+        // or "wss://actrix1.develenv.com/signaling/ws" -> "actrix1.develenv.com"
         let signaling_host = context
             .signaling_url
             .trim_start_matches("ws://")
             .trim_start_matches("wss://")
+            .split('/')
+            .next()
+            .unwrap_or("10.0.2.2")
             .split(':')
             .next()
             .unwrap_or("10.0.2.2")

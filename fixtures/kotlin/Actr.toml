@@ -11,7 +11,7 @@ name = "echo-client-app"
 authors = []
 
 [dependencies]
-echo-real-server = {}
+echo-echo-server = {}
 
 [system.signaling]
 url = "{{SIGNALING_URL}}"
@@ -22,7 +22,7 @@ turn_urls = ["turn:{{SIGNALING_HOST}}:3478"]
 force_relay = true
 
 [system.deployment]
-realm_id = 6
+realm_id = 2368266035
 
 [system.discovery]
 visible = false

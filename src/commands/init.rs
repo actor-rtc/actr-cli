@@ -41,8 +41,18 @@ impl Command for InitCommand {
 
         // Interactive prompt for missing required fields
         let name = self.prompt_if_missing("project name", self.name.as_ref())?;
-        let signaling_url =
-            self.prompt_if_missing("signaling server URL", self.signaling.as_ref())?;
+
+        // For Kotlin/Swift/Python, use default signaling URL if not provided
+        let signaling_url = match self.language {
+            SupportedLanguage::Kotlin | SupportedLanguage::Swift | SupportedLanguage::Python => {
+                self.signaling
+                    .clone()
+                    .unwrap_or_else(|| "wss://actrix1.develenv.com/signaling/ws".to_string())
+            }
+            SupportedLanguage::Rust => {
+                self.prompt_if_missing("signaling server URL", self.signaling.as_ref())?
+            }
+        };
 
         let (project_dir, project_name) = self.resolve_project_info(&name)?;
 

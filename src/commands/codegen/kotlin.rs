@@ -70,8 +70,16 @@ impl KotlinGenerator {
         }
 
         Err(ActrCliError::config_error(
-            "Could not find protoc-gen-actrframework-kotlin plugin.\n\
-             Please set ACTR_KOTLIN_PLUGIN_PATH environment variable or ensure the plugin is in PATH.",
+            "Could not find protoc-gen-actrframework-kotlin plugin.\n\n\
+             Installation options:\n\n\
+             1. Build from source (recommended):\n\
+                git clone https://github.com/actor-rtc/framework-codegen-kotlin.git\n\
+                cd framework-codegen-kotlin\n\
+                ./gradlew installDist\n\
+                export PATH=\"$PWD/build/install/protoc-gen-actrframework-kotlin/bin:$PATH\"\n\n\
+             2. Set environment variable (if already built):\n\
+                export ACTR_KOTLIN_PLUGIN_PATH=/path/to/protoc-gen-actrframework-kotlin\n\n\
+             For more information, visit: https://github.com/actor-rtc/framework-codegen-kotlin",
         ))
     }
 
@@ -107,11 +115,12 @@ impl KotlinGenerator {
     /// Convention: files under "local/" are local, files under "remote/" are remote
     ///
     /// Now reads actr_type from Actr.lock.toml instead of inferring from directory names.
+    /// Returns None if the proto file has no service definitions (skip it).
     fn analyze_proto_file(
         &self,
         proto_path: &PathBuf,
         actr_type_map: &HashMap<String, String>,
-    ) -> ServiceInfo {
+    ) -> Option<ServiceInfo> {
         let path_str = proto_path.to_string_lossy();
         let is_local = path_str.contains("/local/");
 
@@ -138,6 +147,7 @@ impl KotlinGenerator {
 
         // Extract service name from proto file
         // Look for "service ServiceName {"
+        // If no service definition found, return None (skip this proto file)
         let service_name = proto_content
             .lines()
             .find(|l| l.trim().starts_with("service ") && l.contains("{"))
@@ -146,14 +156,19 @@ impl KotlinGenerator {
                 let after_service = trimmed.strip_prefix("service ")?;
                 let name_end = after_service.find([' ', '{'])?;
                 Some(after_service[..name_end].trim().to_string())
-            })
-            .unwrap_or_else(|| {
-                let file_stem = proto_path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("unknown");
-                to_pascal_case(file_stem) + "Service"
             });
+
+        // If no service definition found, skip this proto file
+        let service_name = match service_name {
+            Some(name) => name,
+            None => {
+                debug!(
+                    "analyze_proto_file: {} has no service definition, skipping",
+                    proto_path.display()
+                );
+                return None;
+            }
+        };
 
         // Read proto package from the proto file
         let proto_package = proto_content
@@ -185,13 +200,13 @@ impl KotlinGenerator {
             remote_target_type
         );
 
-        ServiceInfo {
+        Some(ServiceInfo {
             service_name,
             proto_package,
             proto_file_name,
             is_local,
             remote_target_type,
-        }
+        })
     }
 
     /// Load Actr.lock.toml and build a mapping from dependency name to actr_type
@@ -247,13 +262,14 @@ impl KotlinGenerator {
     }
 
     /// Collect all service information from proto files
+    /// Skips proto files that have no service definitions
     fn collect_services(&self, context: &GenContext) -> Result<Vec<ServiceInfo>> {
         let actr_type_map = self.load_actr_type_map(context)?;
 
         Ok(context
             .proto_files
             .iter()
-            .map(|p| self.analyze_proto_file(p, &actr_type_map))
+            .filter_map(|p| self.analyze_proto_file(p, &actr_type_map))
             .collect())
     }
 
