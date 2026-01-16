@@ -111,7 +111,7 @@ impl Command for InitCommand {
             info!("📁 Project created in: {}", project_dir.display());
             info!("");
             info!("Next steps:");
-            info!("  cd {}", project_dir.display());
+            info!("  cd {}/client", project_dir.display());
             info!("  actr install  # Install remote protobuf dependencies from Actr.toml");
             info!("  actr gen                             # Generate Actor code");
             info!("  cargo run                            # Start your work");

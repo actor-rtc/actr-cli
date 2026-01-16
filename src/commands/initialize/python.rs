@@ -1,11 +1,9 @@
-use super::{InitContext, ProjectInitializer, create_local_proto};
+use super::{InitContext, ProjectInitializer};
 
 use crate::commands::SupportedLanguage;
-use crate::error::{ActrCliError, Result};
+use crate::error::Result;
 use crate::template::{ProjectTemplate, TemplateContext};
 use async_trait::async_trait;
-use std::path::Path;
-use std::process::Command;
 use tracing::info;
 
 pub struct PythonInitializer;
@@ -19,15 +17,11 @@ impl ProjectInitializer for PythonInitializer {
             TemplateContext::new(&context.project_name, &context.signaling_url, service_name);
         template.generate(&context.project_dir, &template_context)?;
 
-        // Create local.proto file
-        create_local_proto(
-            &context.project_dir,
-            &context.project_name,
-            "protos/local",
-            context.template,
-        )?;
-
-        run_actr_gen(&context.project_dir)?;
+        // Note: Proto files are now created via templates:
+        //   - server/protos/local/echo.proto (service definition)
+        //   - client/protos/local/.gitkeep (empty directory placeholder)
+        // We don't auto-run 'actr gen' here because it requires Actr.lock.toml
+        // Users should run 'actr install' first, then 'actr gen'
 
         Ok(())
     }
@@ -38,31 +32,15 @@ impl ProjectInitializer for PythonInitializer {
         if !context.is_current_dir {
             info!("  cd {}", context.project_dir.display());
         }
-        info!("  actr install  # Install remote protobuf dependencies from Actr.toml");
-        info!("  actr gen -l python -i protos/remote/{{service-name}}/{{proto-file}} -o generated");
         info!("  cd server");
+        info!("  #First Update Actr.toml with your signaling URL, TURN/STUN server, and realm ID");
+        info!("  actr install  # Install remote protobuf dependencies from Actr.toml");
+        info!("  actr gen -l python -i protos -o generated  # Generate code for server");
         info!("  python server.py --actr-toml Actr.toml");
         info!("  cd ../client");
+        info!("  #First Update Actr.toml with your signaling URL, TURN/STUN server, and realm ID");
+        info!("  actr install  # Install remote protobuf dependencies from Actr.toml");
+        info!("  actr gen -l python -i protos -o generated  # Generate code for client");
         info!("  python client.py --actr-toml Actr.toml");
     }
-}
-
-fn run_actr_gen(project_dir: &Path) -> Result<()> {
-    let output = Command::new("actr")
-        .arg("gen")
-        .arg("--language")
-        .arg("python")
-        .arg("--input=protos")
-        .arg("--output=generated")
-        .arg("--no-scaffold")
-        .current_dir(project_dir)
-        .output()
-        .map_err(|e| ActrCliError::Command(format!("Failed to run actr gen: {e}")))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(ActrCliError::Command(format!("actr gen failed: {stderr}")));
-    }
-
-    Ok(())
 }

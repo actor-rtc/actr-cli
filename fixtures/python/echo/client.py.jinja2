@@ -6,68 +6,20 @@ import logging
 import sys
 from pathlib import Path
 
-from actr import ActrSystem, ActrRuntimeError, ActrType, Context, Dest, WorkloadBase
+from actr import ActrSystem
 
 APP_NAME = "{{PROJECT_NAME_PASCAL}}Client"
 PROJECT_NAME = "{{PROJECT_NAME}}"
 PROJECT_NAME_SNAKE = "{{PROJECT_NAME_SNAKE}}"
 SIGNALING_URL = "{{SIGNALING_URL}}"
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "generated"))
-sys.path.insert(0, str(ROOT))
-
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-from generated import echo_pb2 as pb2
-
-
-class {{PROJECT_NAME_PASCAL}}ClientDispatcher:
-    async def dispatch(self, workload, route_key: str, payload: bytes, ctx:Context) -> bytes:
-        if not isinstance(ctx, Context):
-            ctx = Context(ctx)
-
-        if route_key != "echo.{{PROJECT_NAME_PASCAL}}Service.Echo":
-            raise RuntimeError(f"Unknown route_key: {route_key}")
-
-        request = pb2.EchoRequest.FromString(payload)
-        await workload.ready.wait()
-
-        if workload.server_id is None:
-            response = pb2.EchoResponse(reply="server not available", timestamp=0)
-            return response.SerializeToString()
-
-        response_bytes = await ctx.call(
-            Dest.actor(workload.server_id),
-            "echo.{{PROJECT_NAME_PASCAL}}Service.Echo",
-            request,
-        )
-        response = pb2.EchoResponse.FromString(response_bytes)
-        return response.SerializeToString()
-
-
-class {{PROJECT_NAME_PASCAL}}ClientWorkload(WorkloadBase):
-    def __init__(self) -> None:
-        self.server_type = ActrType("acme", "{{PROJECT_NAME_PASCAL}}Service")
-        self.server_id = None
-        self.ready = asyncio.Event()
-        super().__init__({{PROJECT_NAME_PASCAL}}ClientDispatcher())
-
-    async def on_start(self, ctx:Context) -> None:
-        logger.info("discovering echo service...")
-        try:
-            server_id = await ctx.discover(self.server_type)
-        except ActrRuntimeError as e:
-            logger.error("discover failed: %s", e)
-            self.ready.set()
-            return
-        self.server_id = server_id
-        self.ready.set()
-        logger.info("discovered server: %s", server_id)
-
-    async def on_stop(self, ctx:Context) -> None:
-        logger.info("{{PROJECT_NAME_PASCAL}}ClientWorkload on_stop")
+# Import generated code
+# Note: Run 'actr gen' to generate the workload and remote service stubs
+from generated.{{PROJECT_NAME_SNAKE}}_workload import {{PROJECT_NAME_PASCAL}}Workload
+from generated.remote.echo_echo_server import echo_pb2 as pb2
 
 
 async def _run_app(ref) -> None:
@@ -100,7 +52,7 @@ async def main() -> int:
     args = ap.parse_args()
 
     system = await ActrSystem.from_toml(args.actr_toml)
-    workload = {{PROJECT_NAME_PASCAL}}ClientWorkload()
+    workload = {{PROJECT_NAME_PASCAL}}Workload()
     node = system.attach(workload)
     ref = await node.start()
     logger.info("✅ %s started! Actor ID: %s", APP_NAME, ref.actor_id())
