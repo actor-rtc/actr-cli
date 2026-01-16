@@ -10,10 +10,10 @@ tags = ["dev", "client"]
 
 [package.actr_type]
 manufacturer = "acme"
-name = "data-stream-client-app"
+name = "StreamEchoClient"
 
 [dependencies]
-data-stream-peer-concurrent-server-python = { actr_type = "acme+DataStreamConcurrentServer" }
+stream-echo-server-python = { actr_type = "acme+StreamEchoServer" }
 
 [system.signaling]
 # When running on a physical device, do not use localhost/127.0.0.1.
@@ -44,4 +44,4 @@ test = "xcodebuild test"
 
 [[acl.rules]]
 permission = "allow"
-types = ["acme+DataStreamService"]
+types = ["acme+StreamEchoServer"]

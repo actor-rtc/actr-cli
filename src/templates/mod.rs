@@ -20,7 +20,7 @@ use std::path::Path;
 pub use crate::commands::SupportedLanguage;
 
 pub const DEFAULT_ACTR_SWIFT_VERSION: &str = "0.1.10";
-pub const DEFAULT_ACTR_PROTOCOLS_VERSION: &str = "0.1.0";
+pub const DEFAULT_ACTR_PROTOCOLS_VERSION: &str = "0.1.2";
 
 /// Project template options
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum, Serialize)]

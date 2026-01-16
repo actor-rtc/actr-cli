@@ -11,7 +11,7 @@ final class ActrService: ObservableObject {
 
     var actrSystem: ActrSystem?
     var actrNode: ActrNode?
-    var actr: Actr?
+    var actr: ActrRef?
 {{#if HAS_SERVICES}}
     private var workload: {{WORKLOAD_NAME}}<{{SERVICE_NAME}}HandlerImpl>?
 {{else}}
@@ -36,12 +36,12 @@ final class ActrService: ObservableObject {
 
             let result = try await Task.detached(priority: .userInitiated) { () throws
 {{#if HAS_SERVICES}}
-                -> (ActrSystem, ActrNode, Actr, {{WORKLOAD_NAME}}<{{SERVICE_NAME}}HandlerImpl>) in
+                -> (ActrSystem, ActrNode, ActrRef, {{WORKLOAD_NAME}}<{{SERVICE_NAME}}HandlerImpl>) in
                 let system = try await ActrSystem.from(tomlConfig: configPath)
                 let handler = {{SERVICE_NAME}}HandlerImpl()
                 let workload = {{WORKLOAD_NAME}}(handler: handler)
 {{else}}
-                -> (ActrSystem, ActrNode, Actr, {{WORKLOAD_NAME}}) in
+                -> (ActrSystem, ActrNode, ActrRef, {{WORKLOAD_NAME}}) in
                 let system = try await ActrSystem.from(tomlConfig: configPath)
                 let workload = {{WORKLOAD_NAME}}()
 {{/if}}
@@ -118,7 +118,7 @@ public final class {{name}}HandlerImpl: {{name}}Handler {
     /// RPC method: {{name}}
     public func {{swift_name}}(
         req: {{input_type}},
-        ctx: ContextBridge
+        ctx: Context
     ) async throws -> {{output_type}} {
         // TODO: Implement {{name}}
         logger.info("Received {{name}} request")
@@ -129,20 +129,20 @@ public final class {{name}}HandlerImpl: {{name}}Handler {
 }
 
 extension {{../WORKLOAD_NAME}}: Workload where T == {{name}}HandlerImpl {
-    public func onStart(ctx _: ContextBridge) async throws {}
-    public func onStop(ctx _: ContextBridge) async throws {}
+    public func onStart(ctx _: Context) async throws {}
+    public func onStop(ctx _: Context) async throws {}
 
-    public func dispatch(ctx: ContextBridge, envelope: RpcEnvelopeBridge) async throws -> Data {
+    public func dispatch(ctx: Context, envelope: RpcEnvelope) async throws -> Data {
         return try await __dispatch(ctx: ctx, envelope: envelope)
     }
 }
 {{/each}}
 {{else}}
 extension {{WORKLOAD_NAME}}: Workload {
-    public func onStart(ctx _: ContextBridge) async throws {}
-    public func onStop(ctx _: ContextBridge) async throws {}
+    public func onStart(ctx _: Context) async throws {}
+    public func onStop(ctx _: Context) async throws {}
 
-    public func dispatch(ctx: ContextBridge, envelope: RpcEnvelopeBridge) async throws -> Data {
+    public func dispatch(ctx: Context, envelope: RpcEnvelope) async throws -> Data {
         return try await __dispatch(ctx: ctx, envelope: envelope)
     }
 }

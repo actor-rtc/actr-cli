@@ -135,8 +135,20 @@ impl InitCommand {
             let project_name = if let Some(name) = &self.project_name {
                 name.clone()
             } else {
-                // Let cargo determine the project name from directory
-                "current-dir".to_string() // Placeholder - cargo will override
+                let current_dir = std::env::current_dir().map_err(|e| {
+                    ActrCliError::InvalidProject(format!(
+                        "Failed to resolve current directory: {e}"
+                    ))
+                })?;
+                current_dir
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| {
+                        ActrCliError::InvalidProject(
+                            "Failed to infer project name from current directory".to_string(),
+                        )
+                    })?
             };
             Ok((PathBuf::from("."), project_name))
         } else {

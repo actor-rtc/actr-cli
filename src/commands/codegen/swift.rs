@@ -270,7 +270,6 @@ impl LanguageGenerator for SwiftGenerator {
 
         // Flatten directory structure: move all swift files from subdirectories to output root
         self.flatten_output_directory(&context.output)?;
-
         // Collect generated files (recursively)
         for entry in walkdir::WalkDir::new(&context.output)
             .into_iter()

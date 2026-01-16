@@ -13,21 +13,9 @@ message SendFileResponse {
 // FileTransfer service
 service LocalFileService {
     // Predefined RPC interfaces
-    rpc StartStream (StartStreamRequest) returns (StartStreamResponse);
     rpc PrepareClientStream (PrepareClientStreamRequest) returns (PrepareStreamResponse);
 
     rpc SendFile (SendFileRequest) returns (SendFileResponse);
-}
-
-message StartStreamRequest {
-    string client_id = 1;
-    string stream_id = 2;
-    uint32 message_count = 3;
-}
-
-message StartStreamResponse {
-    bool accepted = 1;
-    string message = 2;
 }
 
 message PrepareClientStreamRequest {

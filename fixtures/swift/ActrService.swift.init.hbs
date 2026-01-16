@@ -11,7 +11,7 @@ final class ActrService: ObservableObject {
 
     internal var actrSystem: ActrSystem?
     internal var actrNode: ActrNode?
-    internal var actr: Actr?
+    internal var actr: ActrRef?
     private var workload: ClientWorkload?
     private let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "io.actr.App",
@@ -31,7 +31,7 @@ final class ActrService: ObservableObject {
             }
 
             let result = try await Task.detached(priority: .userInitiated) { () throws
-                -> (ActrSystem, ActrNode, Actr, ClientWorkload) in
+                -> (ActrSystem, ActrNode, ActrRef, ClientWorkload) in
                 let system = try await ActrSystem.from(tomlConfig: configPath)
                 let workload = ClientWorkload()
                 let node = try system.spawn(workload: workload)
@@ -99,10 +99,10 @@ extension ActrService {
 private actor ClientWorkload: Workload {
     init() {}
 
-    func onStart(ctx _: ContextBridge) async throws {}
-    func onStop(ctx _: ContextBridge) async throws {}
+    func onStart(ctx _: Context) async throws {}
+    func onStop(ctx _: Context) async throws {}
 
-    func dispatch(ctx _: ContextBridge, envelope _: RpcEnvelopeBridge) async throws -> Data {
+    func dispatch(ctx _: Context, envelope _: RpcEnvelope) async throws -> Data {
         throw ActrError.StateError(msg: "Run `actr gen` to generate ActrService implementation")
     }
 }
