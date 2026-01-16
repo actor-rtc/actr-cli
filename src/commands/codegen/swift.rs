@@ -465,6 +465,11 @@ impl SwiftGenerator {
             }
         }
 
+        // 3. Check version compatibility for protoc-gen-actrframework-swift
+        if command_exists(PROTOC_GEN_ACTR_FRAMEWORK_SWIFT) {
+            self.check_and_update_plugin_version()?;
+        }
+
         if missing_tools.is_empty() {
             return Ok(());
         }
@@ -725,6 +730,194 @@ impl SwiftGenerator {
             debug!(
                 "Automatic installation for protoc-gen-actrframework-swift is only supported on macOS (Homebrew/workspace build)"
             );
+        }
+
+        Ok(())
+    }
+
+    /// Check installed protoc-gen-actrframework-swift version and ensure it matches actr version
+    fn check_and_update_plugin_version(&self) -> Result<()> {
+        let actr_version = env!("CARGO_PKG_VERSION");
+        let plugin_version = self.get_plugin_version()?;
+
+        if let Some(plugin_ver) = plugin_version {
+            match self.compare_versions(&plugin_ver, actr_version) {
+                std::cmp::Ordering::Equal => {
+                    debug!(
+                        "✅ protoc-gen-actrframework-swift version {} matches actr version {}",
+                        plugin_ver, actr_version
+                    );
+                    return Ok(());
+                }
+                std::cmp::Ordering::Less => {
+                    warn!(
+                        "⚠️  protoc-gen-actrframework-swift version {} is lower than actr version {}",
+                        plugin_ver, actr_version
+                    );
+                    // Try to update
+                    self.try_update_plugin()?;
+                    // Check version again after update
+                    let updated_version = self.get_plugin_version()?;
+                    if let Some(updated_ver) = updated_version {
+                        match self.compare_versions(&updated_ver, actr_version) {
+                            std::cmp::Ordering::Equal => {
+                                info!(
+                                    "✅ Successfully updated protoc-gen-actrframework-swift to version {}",
+                                    updated_ver
+                                );
+                                return Ok(());
+                            }
+                            std::cmp::Ordering::Less => {
+                                return Err(ActrCliError::command_error(format!(
+                                    "protoc-gen-actrframework-swift version {} is still lower than actr version {} after update. Please manually update it.",
+                                    updated_ver, actr_version
+                                )));
+                            }
+                            std::cmp::Ordering::Greater => {
+                                return Err(ActrCliError::command_error(format!(
+                                    "protoc-gen-actrframework-swift version {} is higher than actr version {} after update. Please downgrade actr or upgrade protoc-gen-actrframework-swift.",
+                                    updated_ver, actr_version
+                                )));
+                            }
+                        }
+                    } else {
+                        return Err(ActrCliError::command_error(
+                            "Failed to get protoc-gen-actrframework-swift version after update"
+                                .to_string(),
+                        ));
+                    }
+                }
+                std::cmp::Ordering::Greater => {
+                    return Err(ActrCliError::command_error(format!(
+                        "protoc-gen-actrframework-swift version {} is higher than actr version {}. Please downgrade protoc-gen-actrframework-swift or upgrade actr.",
+                        plugin_ver, actr_version
+                    )));
+                }
+            }
+        } else {
+            // Version check failed, but tool exists - warn but don't fail
+            warn!(
+                "Could not determine protoc-gen-actrframework-swift version, skipping version check"
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Get the version of installed protoc-gen-actrframework-swift
+    fn get_plugin_version(&self) -> Result<Option<String>> {
+        let output = StdCommand::new(PROTOC_GEN_ACTR_FRAMEWORK_SWIFT)
+            .arg("--version")
+            .output();
+
+        match output {
+            Ok(output) if output.status.success() => {
+                let version_info = String::from_utf8_lossy(&output.stdout);
+                // Parse version from output, e.g., "protoc-gen-actrframework-swift 0.1.10"
+                let version = version_info.lines().next().and_then(|line| {
+                    // Try to find version number (e.g., "0.1.10")
+                    line.split_whitespace()
+                        .find(|s| s.chars().all(|c| c.is_ascii_digit() || c == '.'))
+                        .map(|v| v.to_string())
+                });
+
+                debug!(
+                    "Detected protoc-gen-actrframework-swift version: {:?}",
+                    version
+                );
+                Ok(version)
+            }
+            _ => {
+                debug!("Could not get protoc-gen-actrframework-swift version");
+                Ok(None)
+            }
+        }
+    }
+
+    /// Compare two version strings (e.g., "0.1.10" vs "0.1.15")
+    fn compare_versions(&self, v1: &str, v2: &str) -> std::cmp::Ordering {
+        let parse_version = |v: &str| -> Vec<u32> {
+            v.split('.')
+                .map(|s| s.parse::<u32>().unwrap_or(0))
+                .collect()
+        };
+
+        let v1_parts = parse_version(v1);
+        let v2_parts = parse_version(v2);
+
+        // Compare each part
+        let max_len = v1_parts.len().max(v2_parts.len());
+        for i in 0..max_len {
+            let v1_part = v1_parts.get(i).copied().unwrap_or(0);
+            let v2_part = v2_parts.get(i).copied().unwrap_or(0);
+
+            match v1_part.cmp(&v2_part) {
+                std::cmp::Ordering::Equal => continue,
+                other => return other,
+            }
+        }
+
+        std::cmp::Ordering::Equal
+    }
+
+    /// Try to update protoc-gen-actrframework-swift via Homebrew
+    fn try_update_plugin(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        {
+            if !command_exists("brew") {
+                return Err(ActrCliError::command_error(
+                    "Homebrew not found; cannot update protoc-gen-actrframework-swift".to_string(),
+                ));
+            }
+
+            info!("🔄 Updating Homebrew...");
+            let update_output = StdCommand::new("brew")
+                .arg("update")
+                .output()
+                .map_err(|e| {
+                    ActrCliError::command_error(format!("Failed to run brew update: {e}"))
+                })?;
+
+            if !update_output.status.success() {
+                let stderr = String::from_utf8_lossy(&update_output.stderr);
+                warn!("brew update failed: {}", stderr);
+            } else {
+                info!("✅ Homebrew updated");
+            }
+
+            info!("🔄 Reinstalling protoc-gen-actrframework-swift...");
+            let reinstall_output = StdCommand::new("brew")
+                .arg("reinstall")
+                .arg("protoc-gen-actrframework-swift")
+                .output()
+                .map_err(|e| {
+                    ActrCliError::command_error(format!(
+                        "Failed to run brew reinstall protoc-gen-actrframework-swift: {e}"
+                    ))
+                })?;
+
+            let stdout = String::from_utf8_lossy(&reinstall_output.stdout);
+            let stderr = String::from_utf8_lossy(&reinstall_output.stderr);
+            let combined_output = format!("{stdout}{stderr}");
+            if combined_output.contains("Warning:") {
+                let highlighted_output = colorize_warning_output(combined_output.trim());
+                eprintln!("{highlighted_output}");
+            }
+
+            if !reinstall_output.status.success() {
+                return Err(ActrCliError::command_error(format!(
+                    "brew reinstall protoc-gen-actrframework-swift failed: {stderr}"
+                )));
+            }
+
+            info!("✅ protoc-gen-actrframework-swift reinstalled");
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            return Err(ActrCliError::command_error(
+                "Automatic update for protoc-gen-actrframework-swift is only supported on macOS (Homebrew)".to_string(),
+            ));
         }
 
         Ok(())
