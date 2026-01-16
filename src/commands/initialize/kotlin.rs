@@ -113,10 +113,6 @@ impl ProjectInitializer for KotlinInitializer {
                 fixtures_root.join("kotlin/app/src/main/java/MainActivity.kt"),
                 java_dir.join("MainActivity.kt"),
             ),
-            (
-                fixtures_root.join("kotlin/app/src/main/java/ActrService.kt"),
-                java_dir.join("ActrService.kt"),
-            ),
             // Android Test files
             (
                 fixtures_root.join("kotlin/app/src/androidTest/java/EchoIntegrationTest.kt"),
