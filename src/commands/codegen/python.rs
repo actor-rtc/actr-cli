@@ -102,77 +102,136 @@ impl LanguageGenerator for PythonGenerator {
         );
 
         // 2. Separate local and remote files based on lock file
-        let mut remote_paths = Vec::new();
-        let mut remote_actr_types = Vec::new();
-        let mut local_paths = Vec::new();
+        // Use a struct to keep path and actr_type paired together
+        #[derive(Debug)]
+        struct ProtoFileInfo {
+            path: String,
+            actr_type: Option<String>,
+        }
+
+        let mut remote_files = Vec::new();
+        let mut local_files = Vec::new();
 
         for proto_file in &context.proto_files {
             let relative_path = proto_file.strip_prefix(proto_root).unwrap_or(proto_file);
-            let path_str = relative_path.to_string_lossy().to_string();
 
-            // Check if this file is in the lock file (under remote/)
-            let is_remote = if path_str.contains("/remote/") || path_str.starts_with("remote/") {
-                // Extract the path after "remote/"
-                let remote_relative_path = if let Some(pos) = path_str.find("/remote/") {
-                    &path_str[pos + "/remote/".len()..]
-                } else if path_str.starts_with("remote/") {
-                    &path_str["remote/".len()..]
-                } else {
-                    ""
-                };
+            // Use Path components instead of string matching for reliable path checking
+            let components: Vec<_> = relative_path.components().collect();
+            let is_remote = components
+                .first()
+                .and_then(|c| c.as_os_str().to_str())
+                .map(|s| s == "remote")
+                .unwrap_or(false);
 
-                if !remote_relative_path.is_empty() {
-                    debug!("🔍 Checking remote file: {}", remote_relative_path);
-                    if let Some(actr_type) = remote_services_map.get(remote_relative_path) {
-                        info!(
-                            "✅ Matched remote file '{}' to actr_type '{}'",
-                            remote_relative_path, actr_type
-                        );
-                        remote_actr_types.push(actr_type.clone());
-                        true
-                    } else {
-                        // In remote/ but not in lock file, still treat as remote
-                        warn!("⚠️  Remote file not in lock file: {}", remote_relative_path);
-                        warn!(
-                            "    Available paths in lock: {:?}",
-                            remote_services_map.keys().collect::<Vec<_>>()
-                        );
-                        remote_actr_types.push(String::new()); // Empty actr_type
-                        true
-                    }
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
+            // Normalize path to use Unix-style separators (cross-platform compatible)
+            let path_str = relative_path
+                .components()
+                .filter_map(|c| c.as_os_str().to_str())
+                .collect::<Vec<_>>()
+                .join("/");
 
             if is_remote {
-                remote_paths.push(path_str);
+                // Extract path after "remote/" component
+                let remote_relative_path = relative_path
+                    .components()
+                    .skip(1) // Skip the "remote" component
+                    .filter_map(|c| c.as_os_str().to_str())
+                    .collect::<Vec<_>>()
+                    .join("/");
+
+                if remote_relative_path.is_empty() {
+                    warn!(
+                        "⚠️  Invalid remote path (no content after 'remote/'): {}",
+                        path_str
+                    );
+                    // Treat as local file if path is invalid
+                    local_files.push(ProtoFileInfo {
+                        path: path_str,
+                        actr_type: None,
+                    });
+                    continue;
+                }
+
+                debug!("🔍 Checking remote file: {}", remote_relative_path);
+
+                // Look up actr_type in the lock file mapping
+                let actr_type = remote_services_map.get(&remote_relative_path).cloned();
+
+                // Critical: Remote files MUST have actr_type mapping in lock file
+                if actr_type.is_none() {
+                    return Err(ActrCliError::config_error(format!(
+                        "Remote file '{}' not found in lock file.\n\
+                         Available remote files in lock:\n  {}\n\n\
+                         This usually means:\n\
+                         1. The dependency is not listed in Actr.toml\n\
+                         2. You need to run 'actr install' to update Actr.lock.toml\n\
+                         3. The proto file path in the dependency doesn't match",
+                        remote_relative_path,
+                        remote_services_map
+                            .keys()
+                            .map(|k| format!("- {}", k))
+                            .collect::<Vec<_>>()
+                            .join("\n  ")
+                    )));
+                }
+
+                info!(
+                    "✅ Matched remote file '{}' to actr_type '{}'",
+                    remote_relative_path,
+                    actr_type.as_ref().unwrap()
+                );
+
+                remote_files.push(ProtoFileInfo {
+                    path: path_str,
+                    actr_type,
+                });
             } else {
-                local_paths.push(path_str);
+                local_files.push(ProtoFileInfo {
+                    path: path_str,
+                    actr_type: None,
+                });
             }
         }
 
-        // 3. Build the unified options string
-        info!("🔍 Remote files: {:?}", remote_paths);
-        info!("🔍 Remote actr_types: {:?}", remote_actr_types);
+        // 3. Build the unified options string using key=value format for better reliability
+
+        // Build RemoteFileMapping in format: path1=actr_type1:path2=actr_type2
+        let remote_file_mappings: Vec<String> = remote_files
+            .iter()
+            .filter_map(|f| {
+                if let Some(actr_type) = &f.actr_type {
+                    Some(format!("{}={}", f.path, actr_type))
+                } else {
+                    // Log warning for files without actr_type
+                    warn!("⚠️  Remote file '{}' has no actr_type mapping", f.path);
+                    None
+                }
+            })
+            .collect();
+
+        let local_paths: Vec<String> = local_files.iter().map(|f| f.path.clone()).collect();
+
+        info!("🔍 Remote file mappings: {:?}", remote_file_mappings);
         info!("🔍 Local files: {:?}", local_paths);
 
-        let mut options = format!(
-            "manufacturer={}",
-            context.config.package.actr_type.manufacturer
-        );
+        // Build options string
+        let mut options = String::new();
 
-        if !remote_paths.is_empty() {
-            options.push_str(&format!(",RemoteFiles={}", remote_paths.join(":")));
-            options.push_str(&format!(",RemoteActrTypes={}", remote_actr_types.join(":")));
+        if !remote_file_mappings.is_empty() {
+            if !options.is_empty() {
+                options.push(',');
+            }
+            options.push_str(&format!(
+                "RemoteFileMapping={}",
+                remote_file_mappings.join(":")
+            ));
         }
 
         if !local_paths.is_empty() {
-            options.push_str(&format!(",LocalFiles={}", local_paths.join(":")));
-            // Keep LocalFile for backward compatibility with older plugin versions
-            options.push_str(&format!(",LocalFile={}", local_paths[0]));
+            if !options.is_empty() {
+                options.push(',');
+            }
+            options.push_str(&format!("LocalFiles={}", local_paths.join(":")));
         }
 
         info!("📝 Options: {}", options);
@@ -390,6 +449,9 @@ impl LanguageGenerator for PythonGenerator {
         } else {
             "python"
         };
+
+        // Check protobuf version
+        check_python_protobuf_version(python_cmd)?;
 
         // Collect all Python files in the output directory
         let mut python_files = Vec::new();
@@ -881,4 +943,56 @@ mod tests {
         assert!(!is_in_map);
         // In actual code, this triggers warn! and pushes empty string
     }
+}
+
+/// Check if the installed protobuf version meets the minimum requirement (>= 6.33.3)
+fn check_python_protobuf_version(python_cmd: &str) -> Result<()> {
+    info!("🔍 Checking protobuf version...");
+
+    let output = StdCommand::new(python_cmd)
+        .arg("-c")
+        .arg("import google.protobuf; print(google.protobuf.__version__)")
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            let version_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            info!("📦 Found protobuf version: {}", version_str);
+
+            let version_parts: Vec<u32> = version_str
+                .split('.')
+                .filter_map(|s| s.parse().ok())
+                .collect();
+
+            let required_version = vec![6, 33, 3];
+            let is_compatible = version_parts.len() >= 3
+                && (version_parts[0] > required_version[0]
+                    || (version_parts[0] == required_version[0]
+                        && version_parts[1] > required_version[1])
+                    || (version_parts[0] == required_version[0]
+                        && version_parts[1] == required_version[1]
+                        && version_parts[2] >= required_version[2]));
+
+            if !is_compatible {
+                warn!(
+                    "⚠️  Protobuf version {} is older than required version 6.33.3",
+                    version_str
+                );
+                warn!("   This may cause runtime errors when loading generated code.");
+                warn!("   Please upgrade protobuf:");
+                warn!("     pip install --upgrade 'protobuf>=6.33.3'");
+                warn!("");
+            } else {
+                info!("✅ Protobuf version is compatible");
+            }
+        }
+        _ => {
+            warn!("⚠️  Could not detect protobuf version");
+            warn!("   Please ensure protobuf >= 6.33.3 is installed:");
+            warn!("     pip install 'protobuf>=6.33.3'");
+            warn!("");
+        }
+    }
+
+    Ok(())
 }

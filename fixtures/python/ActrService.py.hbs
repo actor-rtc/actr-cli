@@ -24,7 +24,7 @@ if str(generated_dir) not in sys.path:
     sys.path.insert(0, str(generated_dir))
 
 # 动态导入生成的模块
-from generated import {{PROTO_MODULE}}_pb2 as pb2
+from generated.local import {{PROTO_MODULE}}_pb2 as pb2
 from generated import {{ACTOR_MODULE}} as actor
 
 {{#if HAS_SERVICES}}

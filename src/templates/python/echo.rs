@@ -39,7 +39,22 @@ pub fn load(files: &mut HashMap<String, String>) -> Result<()> {
         ".gitignore",
     )?;
 
-    files.insert("generated/__init__.py".to_string(), "".to_string());
+    // Load proto templates
+    let proto_fixtures = fixtures_root.join("protos");
+
+    // Server: echo service definition
+    ProjectTemplate::load_file(
+        &proto_fixtures.join("echo_service.hbs"),
+        files,
+        "server/protos/local/echo.proto",
+    )?;
+
+    // Client: empty local.proto
+    ProjectTemplate::load_file(
+        &proto_fixtures.join("local.echo.hbs"),
+        files,
+        "client/protos/local/local.proto",
+    )?;
 
     Ok(())
 }

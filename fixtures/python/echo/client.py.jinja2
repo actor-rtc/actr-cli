@@ -16,8 +16,10 @@ SIGNALING_URL = "{{SIGNALING_URL}}"
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
+# Import generated code
+# Note: Run 'actr gen' to generate the workload and remote service stubs
+from generated.{{PROJECT_NAME_SNAKE}}_workload import {{PROJECT_NAME_PASCAL}}Workload
 from generated.remote.echo_echo_server import echo_pb2 as pb2
-from generated.default_workload import DefaultWorkload
 
 
 async def _run_app(ref) -> None:
@@ -50,7 +52,7 @@ async def main() -> int:
     args = ap.parse_args()
 
     system = await ActrSystem.from_toml(args.actr_toml)
-    workload = DefaultWorkload()
+    workload = {{PROJECT_NAME_PASCAL}}Workload()
     node = system.attach(workload)
     ref = await node.start()
     logger.info("✅ %s started! Actor ID: %s", APP_NAME, ref.actor_id())
