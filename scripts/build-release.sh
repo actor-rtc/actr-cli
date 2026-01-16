@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -lt 2 ]]; then
-  echo "Usage: $0 <target> <version>" >&2
+if [[ $# -lt 1 ]]; then
+  echo "Usage: $0 <version>" >&2
   exit 1
 fi
 
-target="$1"
-version="$2"
+version="$1"
 version="${version#v}"
 
+target="aarch64-apple-darwin"
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 dist_dir="${root_dir}/dist"
 
@@ -23,7 +23,7 @@ if [[ ! -f "$bin_path" ]]; then
   exit 1
 fi
 
-asset_name="actr-${version}-${target}"
+asset_name="actr-${version}-macos-arm64"
 tar_path="${dist_dir}/${asset_name}.tar.gz"
 
 tar -czf "$tar_path" -C "$(dirname "$bin_path")" actr
@@ -38,4 +38,5 @@ else
   exit 1
 fi
 
-echo "Built ${tar_path}"
+echo "Release artifact: $tar_path"
+echo "SHA256 file: $sha_path"

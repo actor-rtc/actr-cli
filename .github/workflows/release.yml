@@ -43,24 +43,16 @@ jobs:
 
   build:
     needs: meta
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-latest
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            target: aarch64-apple-darwin
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: aarch64-apple-darwin
 
       - name: Install protoc
         uses: arduino/setup-protoc@v3
@@ -68,13 +60,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build release asset
-        run: scripts/build-release.sh "${{ matrix.target }}" "${{ needs.meta.outputs.version }}"
+        run: scripts/build-release.sh "${{ needs.meta.outputs.version }}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dist-${{ matrix.target }}
-          path: dist/actr-${{ needs.meta.outputs.version }}-${{ matrix.target }}*
+          name: dist-macos-arm64
+          path: dist/actr-${{ needs.meta.outputs.version }}-macos-arm64*
           if-no-files-found: error
 
   release:
@@ -86,7 +78,7 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: dist-*
+          pattern: dist-macos-arm64
           path: dist
           merge-multiple: true
 
@@ -110,36 +102,32 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: dist-*
+          pattern: dist-macos-arm64
           path: dist
           merge-multiple: true
 
-      - name: Checkout Homebrew tap
-        uses: actions/checkout@v4
-        with:
-          repository: actor-rtc/homebrew-tap
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          path: homebrew-tap
-
-      - name: Update formula
-        run: |
-          python3 scripts/update-brew-formula.py \
-            --formula homebrew-tap/Formula/actr.rb \
-            --version "${{ needs.meta.outputs.version }}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --dist dist
-
-      - name: Commit and push
+      - name: Update Homebrew formula
         env:
-          VERSION: ${{ needs.meta.outputs.version }}
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
-          cd homebrew-tap
-          if git diff --quiet; then
-            echo "No changes to commit."
-            exit 0
-          fi
+          VERSION="${{ needs.meta.outputs.version }}"
+          SHA256=$(cat dist/actr-${VERSION}-macos-arm64.tar.gz.sha256)
+          
+          # Clone the tap repository
+          git clone https://x-access-token:${GH_TOKEN}@github.com/actor-rtc/homebrew-tap.git tap
+          
+          # Update the formula file
+          FORMULA="tap/Formula/actr.rb"
+          
+          # Use sed to update version and sha256
+          # On Linux runners, sed -i doesn't require an extension
+          sed -i "s/version \".*\"/version \"$VERSION\"/" "$FORMULA"
+          sed -i "s/sha256 \".*\"/sha256 \"$SHA256\"/" "$FORMULA"
+          
+          # Commit and push
+          cd tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/actr.rb
-          git commit -m "actr ${VERSION}"
+          git add .
+          git commit -m "actr ${VERSION}" || echo "No changes to commit"
           git push
