@@ -621,30 +621,29 @@ impl PythonGenerator {
 
                                     if let Some(returns_pos) = rest.find("returns") {
                                         let rest = &rest[returns_pos + 7..];
-                                        if let Some(output_start) = rest.find('(') {
-                                            if let Some(output_end) = rest.find(')') {
-                                                let output_type = rest
-                                                    [output_start + 1..output_end]
-                                                    .trim()
-                                                    .to_string();
+                                        if let Some(output_start) = rest.find('(')
+                                            && let Some(output_end) = rest.find(')')
+                                        {
+                                            let output_type = rest[output_start + 1..output_end]
+                                                .trim()
+                                                .to_string();
 
-                                                service.methods.push(ProtoMethod {
-                                                    name: method_name,
-                                                    snake_name,
-                                                    input_type,
-                                                    output_type,
-                                                });
-                                            }
+                                            service.methods.push(ProtoMethod {
+                                                name: method_name,
+                                                snake_name,
+                                                input_type,
+                                                output_type,
+                                            });
                                         }
                                     }
                                 }
                             }
                         }
 
-                        if line.contains('}') {
-                            if let Some(s) = current_service.take() {
-                                services.push(s);
-                            }
+                        if line.contains('}')
+                            && let Some(s) = current_service.take()
+                        {
+                            services.push(s);
                         }
                     }
                 }
@@ -803,10 +802,60 @@ fn install_python_plugin(package_name: &str, index_url: Option<&str>) -> Result<
     Ok(())
 }
 
+/// Check if the installed protobuf version meets the minimum requirement (>= 6.33.3)
+fn check_python_protobuf_version(python_cmd: &str) -> Result<()> {
+    info!("🔍 Checking protobuf version...");
+
+    let output = StdCommand::new(python_cmd)
+        .arg("-c")
+        .arg("import google.protobuf; print(google.protobuf.__version__)")
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            let version_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            info!("📦 Found protobuf version: {}", version_str);
+
+            let version_parts: Vec<u32> = version_str
+                .split('.')
+                .filter_map(|s| s.parse().ok())
+                .collect();
+
+            let required_version = [6, 33, 3];
+            let is_compatible = version_parts.len() >= 3
+                && (version_parts[0] > required_version[0]
+                    || (version_parts[0] == required_version[0]
+                        && version_parts[1] > required_version[1])
+                    || (version_parts[0] == required_version[0]
+                        && version_parts[1] == required_version[1]
+                        && version_parts[2] >= required_version[2]));
+
+            if !is_compatible {
+                warn!(
+                    "⚠️  Protobuf version {} is older than required version 6.33.3",
+                    version_str
+                );
+                warn!("   This may cause runtime errors when loading generated code.");
+                warn!("   Please upgrade protobuf:");
+                warn!("     pip install --upgrade 'protobuf>=6.33.3'");
+                warn!("");
+            } else {
+                info!("✅ Protobuf version is compatible");
+            }
+        }
+        _ => {
+            warn!("⚠️  Could not detect protobuf version");
+            warn!("   Please ensure protobuf >= 6.33.3 is installed:");
+            warn!("     pip install 'protobuf>=6.33.3'");
+            warn!("");
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use actr_config::{LockFile, LockedDependency, ProtoFileMeta, ServiceSpecMeta};
     use std::collections::HashMap;
 
     #[test]
@@ -870,9 +919,9 @@ mod tests {
     #[test]
     fn test_options_string_building() {
         let manufacturer = "testco";
-        let remote_paths = vec!["remote/s1.proto".to_string(), "remote/s2.proto".to_string()];
-        let remote_actr_types = vec!["testco+S1".to_string(), "other+S2".to_string()];
-        let local_paths = vec!["local.proto".to_string()];
+        let remote_paths = ["remote/s1.proto".to_string(), "remote/s2.proto".to_string()];
+        let remote_actr_types = ["testco+S1".to_string(), "other+S2".to_string()];
+        let local_paths = ["local.proto".to_string()];
 
         let mut options = format!("manufacturer={}", manufacturer);
 
@@ -921,10 +970,7 @@ mod tests {
         assert_eq!(remote_services_map.get(path2), None);
 
         // Test that we can handle None gracefully with empty string
-        let actr_type = remote_services_map
-            .get(path2)
-            .cloned()
-            .unwrap_or_else(|| String::new());
+        let actr_type = remote_services_map.get(path2).cloned().unwrap_or_default();
         assert_eq!(actr_type, "");
     }
 
@@ -938,61 +984,9 @@ mod tests {
         assert_eq!(remote_services_map.get("any/path.proto"), None);
 
         // Simulating the warning path
-        let path_str = "remote/service/api.proto";
+        let _path_str = "remote/service/api.proto";
         let is_in_map = remote_services_map.contains_key("service/api.proto");
         assert!(!is_in_map);
         // In actual code, this triggers warn! and pushes empty string
     }
-}
-
-/// Check if the installed protobuf version meets the minimum requirement (>= 6.33.3)
-fn check_python_protobuf_version(python_cmd: &str) -> Result<()> {
-    info!("🔍 Checking protobuf version...");
-
-    let output = StdCommand::new(python_cmd)
-        .arg("-c")
-        .arg("import google.protobuf; print(google.protobuf.__version__)")
-        .output();
-
-    match output {
-        Ok(output) if output.status.success() => {
-            let version_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            info!("📦 Found protobuf version: {}", version_str);
-
-            let version_parts: Vec<u32> = version_str
-                .split('.')
-                .filter_map(|s| s.parse().ok())
-                .collect();
-
-            let required_version = vec![6, 33, 3];
-            let is_compatible = version_parts.len() >= 3
-                && (version_parts[0] > required_version[0]
-                    || (version_parts[0] == required_version[0]
-                        && version_parts[1] > required_version[1])
-                    || (version_parts[0] == required_version[0]
-                        && version_parts[1] == required_version[1]
-                        && version_parts[2] >= required_version[2]));
-
-            if !is_compatible {
-                warn!(
-                    "⚠️  Protobuf version {} is older than required version 6.33.3",
-                    version_str
-                );
-                warn!("   This may cause runtime errors when loading generated code.");
-                warn!("   Please upgrade protobuf:");
-                warn!("     pip install --upgrade 'protobuf>=6.33.3'");
-                warn!("");
-            } else {
-                info!("✅ Protobuf version is compatible");
-            }
-        }
-        _ => {
-            warn!("⚠️  Could not detect protobuf version");
-            warn!("   Please ensure protobuf >= 6.33.3 is installed:");
-            warn!("     pip install 'protobuf>=6.33.3'");
-            warn!("");
-        }
-    }
-
-    Ok(())
 }

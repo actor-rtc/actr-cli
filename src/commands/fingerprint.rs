@@ -91,7 +91,7 @@ impl Command for FingerprintCommand {
 async fn execute_proto_fingerprint(args: &FingerprintCommand, proto_path: &str) -> Result<()> {
     let path = Path::new(proto_path);
     if !path.exists() {
-        return Err(anyhow::anyhow!("Proto file not found: {}", proto_path).into());
+        return Err(anyhow::anyhow!("Proto file not found: {}", proto_path));
     }
 
     let content = fs::read_to_string(path)
@@ -107,7 +107,7 @@ async fn execute_proto_fingerprint(args: &FingerprintCommand, proto_path: &str) 
         "yaml" => show_proto_yaml_output(&fingerprint, proto_path)?,
         _ => {
             error!("Unsupported output format: {}", args.format);
-            return Err(anyhow::anyhow!("Unsupported format: {}", args.format).into());
+            return Err(anyhow::anyhow!("Unsupported format: {}", args.format));
         }
     }
 
@@ -145,7 +145,7 @@ async fn execute_service_fingerprint(args: &FingerprintCommand) -> Result<()> {
     if proto_files.is_empty() {
         // No proto files to calculate fingerprint for, but we can still verify lock file
         if args.verify {
-            let verification_status = verify_fingerprint_against_lock("", &[], &config_path)?;
+            let verification_status = verify_fingerprint_against_lock("", &[], config_path)?;
             match args.format.as_str() {
                 "text" => {
                     show_verification_status_only(&verification_status);
@@ -296,7 +296,7 @@ async fn execute_service_fingerprint(args: &FingerprintCommand) -> Result<()> {
 
     // Verify against lock file if requested
     let verification_status = if args.verify {
-        verify_fingerprint_against_lock(&fingerprint, &proto_files, &config_path)?
+        verify_fingerprint_against_lock(&fingerprint, &proto_files, config_path)?
     } else {
         VerificationStatus::NotRequested
     };
@@ -308,7 +308,7 @@ async fn execute_service_fingerprint(args: &FingerprintCommand) -> Result<()> {
         "yaml" => show_yaml_output(&fingerprint, &proto_files, &verification_status)?,
         _ => {
             error!("Unsupported output format: {}", args.format);
-            return Err(anyhow::anyhow!("Unsupported format: {}", args.format).into());
+            return Err(anyhow::anyhow!("Unsupported format: {}", args.format));
         }
     }
 
@@ -614,17 +614,17 @@ fn verify_fingerprint_against_lock(
     // Check service-level fingerprints first
     if let Some(dependencies) = lock_file.get("dependency").and_then(|d| d.as_array()) {
         for dep in dependencies {
-            if let Some(expected_service_fp) = dep.get("fingerprint").and_then(|f| f.as_str()) {
-                if expected_service_fp.starts_with("service_semantic:") {
-                    // Use the current fingerprint passed in
-                    let expected_fp = expected_service_fp.to_string();
-                    let actual_fp = current_fingerprint.to_string();
+            if let Some(expected_service_fp) = dep.get("fingerprint").and_then(|f| f.as_str())
+                && expected_service_fp.starts_with("service_semantic:")
+            {
+                // Use the current fingerprint passed in
+                let expected_fp = expected_service_fp.to_string();
+                let actual_fp = current_fingerprint.to_string();
 
-                    if expected_fp != actual_fp {
-                        service_fingerprint_mismatch = Some((expected_fp, actual_fp));
-                    }
-                    break; // Only check the first dependency for now
+                if expected_fp != actual_fp {
+                    service_fingerprint_mismatch = Some((expected_fp, actual_fp));
                 }
+                break; // Only check the first dependency for now
             }
         }
     }
@@ -651,32 +651,32 @@ fn verify_fingerprint_against_lock(
                         // Find the corresponding proto file in our proto_files list
                         let mut found = false;
                         for proto_file in proto_files {
-                            if let Some(proto_path) = &proto_file.path {
-                                if proto_path == lock_path {
-                                    match Fingerprint::calculate_proto_semantic_fingerprint(
-                                        &proto_file.content,
-                                    ) {
-                                        Ok(actual_fp) => {
-                                            if actual_fp != expected_fp {
-                                                mismatches.push((
-                                                    lock_path.to_string(),
-                                                    expected_fp.to_string(),
-                                                    actual_fp,
-                                                ));
-                                            }
-                                        }
-                                        Err(e) => {
-                                            // Could not calculate fingerprint for this file
+                            if let Some(proto_path) = &proto_file.path
+                                && proto_path == lock_path
+                            {
+                                match Fingerprint::calculate_proto_semantic_fingerprint(
+                                    &proto_file.content,
+                                ) {
+                                    Ok(actual_fp) => {
+                                        if actual_fp != expected_fp {
                                             mismatches.push((
                                                 lock_path.to_string(),
                                                 expected_fp.to_string(),
-                                                format!("ERROR: {}", e),
+                                                actual_fp,
                                             ));
                                         }
                                     }
-                                    found = true;
-                                    break;
+                                    Err(e) => {
+                                        // Could not calculate fingerprint for this file
+                                        mismatches.push((
+                                            lock_path.to_string(),
+                                            expected_fp.to_string(),
+                                            format!("ERROR: {}", e),
+                                        ));
+                                    }
                                 }
+                                found = true;
+                                break;
                             }
                         }
 
