@@ -36,6 +36,7 @@ pub enum SupportedLanguage {
 pub use check::CheckCommand;
 pub use discovery::DiscoveryCommand;
 pub use doc::DocCommand;
+pub use fingerprint::FingerprintCommand;
 pub use generate::GenCommand;
 pub use init::InitCommand;
 pub use install::InstallCommand;
