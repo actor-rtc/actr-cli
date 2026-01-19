@@ -16,16 +16,16 @@ path = "src/main.rs"
 # actr-protocol = { path = "../actr/crates/protocol" }
 # actr-config = { path = "../actr/crates/config" }
 # actr-version = { path = "../actr/crates/version" }
-actr-protocol = { git = "https://github.com/actor-rtc/actr.git", rev = "79bc38887c2afb8a629c3e52cf5474db4c2d6baa" }
-actr-config = { git = "https://github.com/actor-rtc/actr.git", rev = "79bc38887c2afb8a629c3e52cf5474db4c2d6baa" }
-actr-version = { git = "https://github.com/actor-rtc/actr.git", rev = "79bc38887c2afb8a629c3e52cf5474db4c2d6baa" }
+actr-protocol = { git = "https://github.com/actor-rtc/actr.git", rev = "7ba13de7afa54856a8e08536213073729f8eb155" }
+actr-config = { git = "https://github.com/actor-rtc/actr.git", rev = "7ba13de7afa54856a8e08536213073729f8eb155" }
+actr-version = { git = "https://github.com/actor-rtc/actr.git", rev = "7ba13de7afa54856a8e08536213073729f8eb155" }
 
 [dependencies]
 # Actor-RTC crates - only what CLI actually needs
-actr-config = "0.1.7"
-actr-protocol = "0.1.6"
-actr-version = "0.1.4"
-actr-framework-protoc-codegen = "0.1.6"
+actr-config = "0.1.8"
+actr-protocol = "0.1.7"
+actr-version = "0.1.5"
+actr-framework-protoc-codegen = "0.1.10"
 
 # Command line interface
 clap = { version = "4.5.53", features = ["derive", "cargo"] }
