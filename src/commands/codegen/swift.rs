@@ -4,7 +4,6 @@ use crate::utils::{command_exists, to_pascal_case};
 use actr_config::LockFile;
 use async_trait::async_trait;
 use handlebars::Handlebars;
-use owo_colors::OwoColorize;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
@@ -23,7 +22,10 @@ const PROTOC_GEN_ACTR_FRAMEWORK_SWIFT: &str = "protoc-gen-actrframework-swift";
 
 pub struct SwiftGenerator;
 
+#[cfg(target_os = "macos")]
 fn colorize_warning_output(output: &str) -> String {
+    use owo_colors::OwoColorize;
+
     let warning_label = format!("{}", "Warning:".yellow());
     output.replace("Warning:", &warning_label)
 }
@@ -913,14 +915,17 @@ impl SwiftGenerator {
             info!("✅ protoc-gen-actrframework-swift reinstalled");
         }
 
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "macos")]
         {
-            return Err(ActrCliError::command_error(
-                "Automatic update for protoc-gen-actrframework-swift is only supported on macOS (Homebrew)".to_string(),
-            ));
+            Ok(())
         }
 
-        Ok(())
+        #[cfg(not(target_os = "macos"))]
+        {
+            Err(ActrCliError::command_error(
+                "Automatic update for protoc-gen-actrframework-swift is only supported on macOS (Homebrew)".to_string(),
+            ))
+        }
     }
 
     fn has_messages_enums_or_extensions(&self, path: &Path) -> bool {
