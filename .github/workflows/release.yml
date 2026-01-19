@@ -112,17 +112,34 @@ jobs:
         run: |
           VERSION="${{ needs.meta.outputs.version }}"
           SHA256=$(cat dist/actr-${VERSION}-macos-arm64.tar.gz.sha256)
+          ASSET="actr-${VERSION}-macos-arm64.tar.gz"
+          URL="https://github.com/actor-rtc/actr-cli/releases/download/v${VERSION}/${ASSET}"
           
           # Clone the tap repository
           git clone https://x-access-token:${GH_TOKEN}@github.com/actor-rtc/homebrew-tap.git tap
           
           # Update the formula file
-          FORMULA="tap/Formula/actr.rb"
+          FORMULA="tap/Formula/actr-cli.rb"
+          rm -f "tap/Formula/actr.rb"
+          cat > "$FORMULA" <<EOF
+          class ActrCli < Formula
+            desc "Actr CLI"
+            homepage "https://github.com/actor-rtc/actr-cli"
+            version "${VERSION}"
+            license "MIT"
           
-          # Use sed to update version and sha256
-          # On Linux runners, sed -i doesn't require an extension
-          sed -i "s/version \".*\"/version \"$VERSION\"/" "$FORMULA"
-          sed -i "s/sha256 \".*\"/sha256 \"$SHA256\"/" "$FORMULA"
+            on_macos do
+              on_arm do
+                url "${URL}"
+                sha256 "${SHA256}"
+              end
+            end
+          
+            def install
+              bin.install "actr"
+            end
+          end
+          EOF
           
           # Commit and push
           cd tap
