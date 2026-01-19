@@ -18,6 +18,11 @@ pub fn load(files: &mut HashMap<String, String>) -> Result<()> {
         "Actr.toml",
     )?;
     ProjectTemplate::load_file(
+        &fixtures_root.join("swift/Actr.lock.toml.hbs"),
+        files,
+        "Actr.lock.toml",
+    )?;
+    ProjectTemplate::load_file(
         &fixtures_root.join("swift/gitignore.hbs"),
         files,
         ".gitignore",

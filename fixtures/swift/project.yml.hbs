@@ -27,6 +27,9 @@ targets:
       - path: Actr.toml
         type: file
         buildPhase: resources
+      - path: Actr.lock.toml
+        type: file
+        buildPhase: resources
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: io.actr.{{PROJECT_NAME_PASCAL}}
       INFOPLIST_FILE: {{PROJECT_NAME_PASCAL}}/Info.plist
