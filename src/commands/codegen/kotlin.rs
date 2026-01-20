@@ -1,5 +1,6 @@
 use crate::commands::codegen::traits::{GenContext, LanguageGenerator};
 use crate::error::{ActrCliError, Result};
+use crate::utils::to_snake_case;
 use actr_config::LockFile;
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -22,6 +23,19 @@ struct ServiceInfo {
     is_local: bool,
     /// Remote target actor type (only for remote services)
     remote_target_type: Option<String>,
+    /// List of RPC methods in this service
+    methods: Vec<MethodInfo>,
+}
+
+/// Information about an RPC method
+#[derive(Debug, Clone)]
+struct MethodInfo {
+    /// Method name (e.g., "send_file")
+    name: String,
+    /// Request type (e.g., "SendFileRequest")
+    request_type: String,
+    /// Response type (e.g., "SendFileResponse")
+    response_type: String,
 }
 
 impl KotlinGenerator {
@@ -193,13 +207,50 @@ impl KotlinGenerator {
             .unwrap_or("unknown.proto")
             .to_string();
 
+        // Extract RPC methods from proto file
+        let mut methods = Vec::new();
+        for line in proto_content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("rpc ") {
+                // Parse: rpc method_name(request_type) returns (response_type);
+                if let Some(rpc_content) = trimmed.strip_prefix("rpc ") {
+                    if let Some(semicolon_pos) = rpc_content.find(';') {
+                        let rpc_def = &rpc_content[..semicolon_pos];
+                        // Split by " returns "
+                        if let Some((method_and_req, resp_part)) = rpc_def.split_once(" returns ") {
+                            // Parse method name and request type
+                            if let Some((method_name, req_part)) = method_and_req.split_once('(') {
+                                let method_name = to_snake_case(method_name.trim());
+                                if let Some(req_type) = req_part.strip_suffix(')') {
+                                    let request_type = req_type.trim().to_string();
+                                    // Parse response type
+                                    if let Some(resp_type) = resp_part
+                                        .strip_prefix('(')
+                                        .and_then(|s| s.strip_suffix(')'))
+                                    {
+                                        let response_type = resp_type.trim().to_string();
+                                        methods.push(MethodInfo {
+                                            name: method_name,
+                                            request_type,
+                                            response_type,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         debug!(
-            "analyze_proto_file: {} -> service={}, package={}, is_local={}, remote_target_type={:?}",
+            "analyze_proto_file: {} -> service={}, package={}, is_local={}, remote_target_type={:?}, methods={}",
             proto_path.display(),
             service_name,
             proto_package,
             is_local,
-            remote_target_type
+            remote_target_type,
+            methods.len()
         );
 
         Some(ServiceInfo {
@@ -208,6 +259,7 @@ impl KotlinGenerator {
             proto_file_name,
             is_local,
             remote_target_type,
+            methods,
         })
     }
 
@@ -920,18 +972,40 @@ package {base_package}
             service.proto_package, outer_class
         ));
 
-        // Generate TODO method stubs based on service type
-        method_impls.push_str(&format!(
-            r#"
-    // ===== {} methods =====
-    // TODO: Implement your business logic for {} methods
-    // Example method (adjust based on your actual proto definition):
-    // override suspend fun your_method(request: YourRequest, ctx: ContextBridge): YourResponse {{
-    //     // Your implementation here
-    // }}
+        // Generate method implementations for each RPC method
+        for method in &service.methods {
+            method_impls.push_str(&format!(
+                r#"
+    /**
+     * Handle {} request for {} service
+     *
+     * @param request The {} request message
+     * @param ctx Context bridge for actor operations
+     * @return {} response message
+     */
+    override suspend fun {}(request: {}, ctx: ContextBridge): {} {{
+        TODO("Not yet implemented")
+    }}
 "#,
-            service.service_name, service.service_name,
-        ));
+                method.name,
+                service.service_name,
+                method.request_type,
+                method.response_type,
+                method.name,
+                method.request_type,
+                method.response_type
+            ));
+        }
+
+        // Add a separator comment between services
+        if !service.methods.is_empty() {
+            method_impls.push_str(&format!(
+                r#"
+    // ===== End of {} methods =====
+"#,
+                service.service_name
+            ));
+        }
     }
 
     format!(

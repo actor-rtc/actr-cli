@@ -46,9 +46,12 @@ protobuf {
     }
 }
 
-// Copy proto files from protos/remote to src/main/proto for protobuf plugin
+// Copy proto files from protos/remote and protos/local to src/main/proto for protobuf plugin
 val copyProtos = tasks.register<Copy>("copyProtos") {
     from("${rootProject.projectDir}/protos/remote") {
+        include("**/*.proto")
+    }
+    from("${rootProject.projectDir}/protos/local") {
         include("**/*.proto")
     }
     into("src/main/proto")
