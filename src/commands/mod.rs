@@ -1,9 +1,8 @@
 //! Command implementations for actr-cli
 
 pub mod check;
-// TODO: config command needs rewrite for new Config API
-// pub mod config;
 pub mod codegen;
+pub mod config;
 pub mod discovery;
 pub mod doc;
 pub mod fingerprint;
@@ -34,6 +33,7 @@ pub enum SupportedLanguage {
 
 // Re-export new architecture commands
 pub use check::CheckCommand;
+pub use config::ConfigCommand;
 pub use discovery::DiscoveryCommand;
 pub use doc::DocCommand;
 pub use fingerprint::FingerprintCommand;

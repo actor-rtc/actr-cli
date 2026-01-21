@@ -20,8 +20,8 @@ use actr_cli::core::{
 
 // 导入命令实现
 use actr_cli::commands::{
-    CheckCommand, Command as LegacyCommand, DiscoveryCommand, DocCommand, FingerprintCommand,
-    GenCommand, InitCommand, InstallCommand,
+    CheckCommand, Command as LegacyCommand, ConfigCommand, DiscoveryCommand, DocCommand,
+    FingerprintCommand, GenCommand, InitCommand, InstallCommand,
 };
 
 /// ACTR-CLI - Actor-RTC Command Line Tool
@@ -63,6 +63,9 @@ enum Commands {
 
     /// Compute semantic fingerprints
     Fingerprint(FingerprintCommand),
+
+    /// Manage project configuration
+    Config(ConfigCommand),
 }
 
 #[tokio::main]
@@ -270,6 +273,11 @@ async fn execute_command(
             )),
             Err(e) => Err(e.into()),
         },
+        Commands::Config(cmd) => {
+            // Config command uses the new Command trait from core
+            use actr_cli::core::Command;
+            cmd.execute(context).await
+        }
     }
 }
 

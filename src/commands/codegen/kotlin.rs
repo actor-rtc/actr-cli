@@ -213,28 +213,28 @@ impl KotlinGenerator {
             let trimmed = line.trim();
             if trimmed.starts_with("rpc ") {
                 // Parse: rpc method_name(request_type) returns (response_type);
-                if let Some(rpc_content) = trimmed.strip_prefix("rpc ") {
-                    if let Some(semicolon_pos) = rpc_content.find(';') {
-                        let rpc_def = &rpc_content[..semicolon_pos];
-                        // Split by " returns "
-                        if let Some((method_and_req, resp_part)) = rpc_def.split_once(" returns ") {
-                            // Parse method name and request type
-                            if let Some((method_name, req_part)) = method_and_req.split_once('(') {
-                                let method_name = to_snake_case(method_name.trim());
-                                if let Some(req_type) = req_part.strip_suffix(')') {
-                                    let request_type = req_type.trim().to_string();
-                                    // Parse response type
-                                    if let Some(resp_type) = resp_part
-                                        .strip_prefix('(')
-                                        .and_then(|s| s.strip_suffix(')'))
-                                    {
-                                        let response_type = resp_type.trim().to_string();
-                                        methods.push(MethodInfo {
-                                            name: method_name,
-                                            request_type,
-                                            response_type,
-                                        });
-                                    }
+                if let Some(rpc_content) = trimmed.strip_prefix("rpc ")
+                    && let Some(semicolon_pos) = rpc_content.find(';')
+                {
+                    let rpc_def = &rpc_content[..semicolon_pos];
+                    // Split by " returns "
+                    if let Some((method_and_req, resp_part)) = rpc_def.split_once(" returns ") {
+                        // Parse method name and request type
+                        if let Some((method_name, req_part)) = method_and_req.split_once('(') {
+                            let method_name = to_snake_case(method_name.trim());
+                            if let Some(req_type) = req_part.strip_suffix(')') {
+                                let request_type = req_type.trim().to_string();
+                                // Parse response type
+                                if let Some(resp_type) = resp_part
+                                    .strip_prefix('(')
+                                    .and_then(|s| s.strip_suffix(')'))
+                                {
+                                    let response_type = resp_type.trim().to_string();
+                                    methods.push(MethodInfo {
+                                        name: method_name,
+                                        request_type,
+                                        response_type,
+                                    });
                                 }
                             }
                         }
