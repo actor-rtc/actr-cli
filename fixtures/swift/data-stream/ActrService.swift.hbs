@@ -104,40 +104,6 @@ extension ActrService {
         }
     }
 
-    /// Send a file via RPC request
-    /// - Parameter fileURL: The URL of the file to send
-    /// - Returns: SendFileResponse containing the result of the file transfer
-    func sendFile(fileURL: URL) async throws -> {{PROJECT_NAME_PASCAL}}_SendFileResponse {
-        guard connectionStatus == .connected else {
-            throw ActrError.StateError(msg: "Not connected to server")
-        }
-
-        guard let actr = actr else {
-            throw ActrError.StateError(msg: "Actor reference not available")
-        }
-
-        do {
-            // Create request with file path
-            var request = {{PROJECT_NAME_PASCAL}}_SendFileRequest()
-            request.filePath = fileURL.path
-
-            logger.info("Sending file at path: \(fileURL.path)")
-
-            // Call RPC
-            let response = try await actr.call(request)
-
-            logger.info("File transfer completed: success=\(response.success)")
-
-            return response
-        } catch let actrError as ActrError {
-            logger.error("File send error: \(actrError.localizedDescription)")
-            throw actrError
-        } catch {
-            logger.error("File send error: \(error.localizedDescription)")
-            throw error
-        }
-    }
-
     /// Prepare client-side stream handling
     /// - Parameter expectedCount: Number of messages expected from the server
     /// - Returns: PrepareStreamResponse containing the result
@@ -171,7 +137,7 @@ extension ActrService {
 }
 
 /// Simple stream handler that logs incoming chunks.
-private actor StreamPrintCallback: DataStreamCallback {
+private actor StreamPrintCallback: Actr.DataStreamCallback {
     private let streamId: String
     private let onMessage: (@Sendable (String) -> Void)?
 
@@ -180,7 +146,7 @@ private actor StreamPrintCallback: DataStreamCallback {
         self.onMessage = onMessage
     }
 
-    func onStream(chunk: DataStream, sender: ActrId) async throws {
+    func onStream(chunk: Actr.DataStream, sender: ActrId) async throws {
         let senderRepr = "\(sender.type.toStringRepr())#\(sender.serialNumber)"
         let payloadText = String(data: chunk.payload, encoding: .utf8) ?? "<non-utf8 data>"
         let message = "stream_id=\(streamId), seq=\(chunk.sequence), bytes=\(chunk.payload.count), sender=\(senderRepr), text=\"\(payloadText)\""
@@ -191,7 +157,7 @@ private actor StreamPrintCallback: DataStreamCallback {
 
 /// Implementation of {{SERVICE_NAME}}Handler
 public actor {{SERVICE_NAME}}HandlerImpl: {{SERVICE_NAME}}Handler {
-    private var streamCallbacks: [String: DataStreamCallback] = [:]
+    private var streamCallbacks: [String: Actr.DataStreamCallback] = [:]
     private let onMessage: (@Sendable (String) -> Void)?
 
     public init(onMessage: (@Sendable (String) -> Void)? = nil) {
@@ -255,142 +221,6 @@ public actor {{SERVICE_NAME}}HandlerImpl: {{SERVICE_NAME}}Handler {
             payload: payload
         )
         return try StreamServer_RegisterStreamResponse(serializedBytes: responseData)
-    }
-
-    /// RPC method: SendFile
-    public func sendFile(
-        req: {{PROJECT_NAME_PASCAL}}_SendFileRequest,
-        ctx: Actr.Context
-    ) async throws -> {{PROJECT_NAME_PASCAL}}_SendFileResponse {
-        let filePath = req.filePath
-        logger.info("📤 Starting file transfer for path: \(filePath)")
-
-        // 1. Convert file path to URL and get filename
-        let fileURL: URL
-        if filePath.hasPrefix("file://") {
-            guard let url = URL(string: filePath) else {
-                logger.error("❌ Invalid file path: \(filePath)")
-                var response = {{PROJECT_NAME_PASCAL}}_SendFileResponse()
-                response.success = false
-                return response
-            }
-            fileURL = url
-        } else {
-            fileURL = URL(fileURLWithPath: filePath)
-        }
-
-        let fileName = fileURL.lastPathComponent
-        logger.info("📄 File name: \(fileName)")
-
-        // Ensure we have access to the file if it's a security-scoped resource
-        let needsSecurityScope = fileURL.startAccessingSecurityScopedResource()
-        defer {
-            if needsSecurityScope {
-                fileURL.stopAccessingSecurityScopedResource()
-            }
-        }
-
-        let fileData: Data
-        do {
-            fileData = try Data(contentsOf: fileURL)
-            logger.info("📄 File read successfully: \(fileData.count) bytes")
-        } catch {
-            logger.error("❌ Failed to read file: \(error.localizedDescription)")
-            var response = {{PROJECT_NAME_PASCAL}}_SendFileResponse()
-            response.success = false
-            return response
-        }
-
-        // 2. Split file into chunks
-        let chunkSize = 1024 * 8 // 8KB chunks
-        var chunks: [Data] = []
-        var offset = 0
-        while offset < fileData.count {
-            let end = min(offset + chunkSize, fileData.count)
-            chunks.append(fileData.subdata(in: offset ..< end))
-            offset = end
-        }
-
-        logger.info("📦 File split into \(chunks.count) chunks (chunk size: \(chunkSize) bytes)")
-
-        // 3. Discover the receiver
-        let targetId: ActrId
-        do {
-            let targetType = try ActrType.fromStringRepr("acme+DataStreamConcurrentServer")
-            logger.info("🌐 Discovering receiver via signaling for type: \(targetType.manufacturer).\(targetType.name)")
-            targetId = try await ctx.discover(targetType: targetType)
-            logger.info("🎯 Discovered receiver: \(String(describing: targetId))")
-        } catch {
-            logger.error("❌ Failed to discover receiver: \(error.localizedDescription)")
-            var response = {{PROJECT_NAME_PASCAL}}_SendFileResponse()
-            response.success = false
-            return response
-        }
-
-        // 4. Register stream with server
-        logger.info("📡 Phase 1: Sending RegisterStream RPC...")
-        var registerReq = StreamServer_RegisterStreamRequest()
-        registerReq.streamID = "file-transfer-\(UUID().uuidString)"
-        registerReq.messageCount = Int32(chunks.count)
-
-        do {
-            let registerReqData = try registerReq.serializedData()
-            let registerRespData = try await ctx.call(
-                target: targetId,
-                routeKey: "stream_server.StreamServer.RegisterStream",
-                payload: registerReqData
-            )
-
-            let registerResp = try StreamServer_RegisterStreamResponse(serializedBytes: registerRespData)
-            if !registerResp.success {
-                logger.error("❌ RegisterStream refused: \(registerResp.message)")
-                var response = {{PROJECT_NAME_PASCAL}}_SendFileResponse()
-                response.success = false
-                return response
-            }
-
-            logger.info("✅ RegisterStream RPC succeeded: \(registerResp.message)")
-        } catch {
-            logger.error("❌ RegisterStream failed: \(error.localizedDescription)")
-            var response = {{PROJECT_NAME_PASCAL}}_SendFileResponse()
-            response.success = false
-            return response
-        }
-
-        // 5. Send file chunks via DataStream
-        logger.info("📦 Phase 2: Sending \(chunks.count) DataStream chunks...")
-        let streamId = registerReq.streamID
-
-        for (i, chunk) in chunks.enumerated() {
-            let dataStream = DataStream(
-                streamId: streamId,
-                sequence: UInt64(i),
-                payload: chunk,
-                metadata: [],
-                timestampMs: Int64(Date().timeIntervalSince1970 * 1000)
-            )
-
-            do {
-                try await ctx.sendDataStream(target: targetId, chunk: dataStream)
-
-                if (i + 1) % 10 == 0 || i == chunks.count - 1 {
-                    let progress = Int(Double(i + 1) / Double(chunks.count) * 100.0)
-                    logger.info("   Sent chunk #\(i + 1)/\(chunks.count): \(chunk.count) bytes (\(progress)%)")
-                }
-            } catch {
-                logger.error("❌ Failed to send chunk #\(i + 1): \(error.localizedDescription)")
-                var response = {{PROJECT_NAME_PASCAL}}_SendFileResponse()
-                response.success = false
-                return response
-            }
-        }
-
-        logger.info("✅ All chunks sent successfully")
-        logger.info("🎉 File transfer completed successfully!")
-
-        var response = {{PROJECT_NAME_PASCAL}}_SendFileResponse()
-        response.success = true
-        return response
     }
 }
 

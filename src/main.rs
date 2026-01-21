@@ -33,8 +33,12 @@ use actr_cli::commands::{
     version
 )]
 struct Cli {
+    /// Verbosity level (use -vv for version and commit info)
+    #[arg(short, action = clap::ArgAction::Count)]
+    verbose: u8,
+
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -79,6 +83,17 @@ async fn main() -> Result<()> {
     // 使用 clap 解析命令行参数
     let cli = Cli::parse();
 
+    // Handle -vv for version and commit info
+    if cli.verbose >= 2 {
+        println!(
+            "actr {} ({} {})",
+            env!("CARGO_PKG_VERSION"),
+            env!("ACTR_GIT_HASH"),
+            env!("ACTR_GIT_DATE")
+        );
+        return Ok(());
+    }
+
     // 构建服务容器并注册组件
     let container = build_container().await?;
 
@@ -95,41 +110,46 @@ async fn main() -> Result<()> {
     };
 
     // 根据命令分发执行
-    match execute_command(&cli.command, &context).await {
-        Ok(result) => match result {
-            actr_cli::core::CommandResult::Success(msg) => {
-                if msg != "Help displayed" {
-                    println!("{msg}");
+    if let Some(cmd) = &cli.command {
+        match execute_command(cmd, &context).await {
+            Ok(result) => match result {
+                actr_cli::core::CommandResult::Success(msg) => {
+                    if msg != "Help displayed" {
+                        println!("{msg}");
+                    }
                 }
-            }
-            actr_cli::core::CommandResult::Install(install_result) => {
-                println!("Installation complete: {}", install_result.summary());
-            }
-            actr_cli::core::CommandResult::Validation(validation_report) => {
-                let formatted = ErrorReporter::format_validation_report(&validation_report);
-                println!("{formatted}");
-            }
-            actr_cli::core::CommandResult::Generation(gen_result) => {
-                println!("Generated {} files", gen_result.generated_files.len());
-            }
-            actr_cli::core::CommandResult::Error(error) => {
-                eprintln!("{} {error}", "❌".red());
+                actr_cli::core::CommandResult::Install(install_result) => {
+                    println!("Installation complete: {}", install_result.summary());
+                }
+                actr_cli::core::CommandResult::Validation(validation_report) => {
+                    let formatted = ErrorReporter::format_validation_report(&validation_report);
+                    println!("{formatted}");
+                }
+                actr_cli::core::CommandResult::Generation(gen_result) => {
+                    println!("Generated {} files", gen_result.generated_files.len());
+                }
+                actr_cli::core::CommandResult::Error(error) => {
+                    eprintln!("{} {error}", "❌".red());
+                    std::process::exit(1);
+                }
+            },
+            Err(e) => {
+                // 统一的错误处理
+                if let Some(cli_error) = e.downcast_ref::<ActrCliError>() {
+                    if matches!(cli_error, ActrCliError::OperationCancelled) {
+                        // Exit silently
+                        std::process::exit(0);
+                    }
+                    eprintln!("{}", ErrorReporter::format_error(cli_error));
+                } else {
+                    eprintln!("{} {e:?}", "Error:".red());
+                }
                 std::process::exit(1);
             }
-        },
-        Err(e) => {
-            // 统一的错误处理
-            if let Some(cli_error) = e.downcast_ref::<ActrCliError>() {
-                if matches!(cli_error, ActrCliError::OperationCancelled) {
-                    // Exit silently
-                    std::process::exit(0);
-                }
-                eprintln!("{}", ErrorReporter::format_error(cli_error));
-            } else {
-                eprintln!("{} {e:?}", "Error:".red());
-            }
-            std::process::exit(1);
         }
+    } else {
+        use clap::CommandFactory;
+        Cli::command().print_help()?;
     }
 
     Ok(())

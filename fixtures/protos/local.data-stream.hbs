@@ -2,20 +2,10 @@ syntax = "proto3";
 
 package {{PROJECT_NAME_SNAKE}};
 
-message SendFileRequest {
-    string file_path = 1;        // File path (URL path)
-}
-
-message SendFileResponse {
-    bool success = 1;           // Transfer completed successfully
-}
-
-// FileTransfer service
+// LocalFileService service
 service LocalFileService {
     // Predefined RPC interfaces
     rpc PrepareClientStream (PrepareClientStreamRequest) returns (PrepareStreamResponse);
-
-    rpc SendFile (SendFileRequest) returns (SendFileResponse);
 }
 
 message PrepareClientStreamRequest {
