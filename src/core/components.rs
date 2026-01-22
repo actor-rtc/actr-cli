@@ -25,6 +25,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 // ============================================================================
 // 核心数据类型
@@ -130,6 +131,7 @@ pub struct NetworkValidation {
     pub health: HealthStatus,
     pub latency_ms: Option<u64>,
     pub error: Option<String>,
+    pub is_applicable: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -161,7 +163,10 @@ impl ValidationReport {
         self.is_valid
             && self.config_validation.is_valid
             && self.dependency_validation.iter().all(|d| d.is_available)
-            && self.network_validation.iter().all(|n| n.is_reachable)
+            && self
+                .network_validation
+                .iter()
+                .all(|n| !n.is_applicable || n.is_reachable)
             && self.fingerprint_validation.iter().all(|f| f.is_valid)
             && self.conflicts.is_empty()
     }
@@ -296,16 +301,32 @@ pub enum HealthStatus {
 #[async_trait]
 pub trait NetworkValidator: Send + Sync {
     /// 检查连通性
-    async fn check_connectivity(&self, service_name: &str) -> Result<ConnectivityStatus>;
+    async fn check_connectivity(
+        &self,
+        service_name: &str,
+        options: &NetworkCheckOptions,
+    ) -> Result<ConnectivityStatus>;
 
     /// 验证服务健康状态
-    async fn verify_service_health(&self, service_name: &str) -> Result<HealthStatus>;
+    async fn verify_service_health(
+        &self,
+        service_name: &str,
+        options: &NetworkCheckOptions,
+    ) -> Result<HealthStatus>;
 
     /// 测试延迟
-    async fn test_latency(&self, service_name: &str) -> Result<LatencyInfo>;
+    async fn test_latency(
+        &self,
+        service_name: &str,
+        options: &NetworkCheckOptions,
+    ) -> Result<LatencyInfo>;
 
     /// 批量检查
-    async fn batch_check(&self, service_names: &[String]) -> Result<Vec<NetworkCheckResult>>;
+    async fn batch_check(
+        &self,
+        service_names: &[String],
+        options: &NetworkCheckOptions,
+    ) -> Result<Vec<NetworkCheckResult>>;
 }
 
 #[derive(Debug, Clone)]
@@ -328,6 +349,30 @@ pub struct NetworkCheckResult {
     pub connectivity: ConnectivityStatus,
     pub health: HealthStatus,
     pub latency: Option<LatencyInfo>,
+}
+
+/// Options for network checks.
+#[derive(Debug, Clone)]
+pub struct NetworkCheckOptions {
+    pub timeout: Duration,
+}
+
+impl NetworkCheckOptions {
+    pub fn with_timeout(timeout: Duration) -> Self {
+        Self { timeout }
+    }
+
+    pub fn with_timeout_secs(timeout_secs: u64) -> Self {
+        Self::with_timeout(Duration::from_secs(timeout_secs))
+    }
+}
+
+impl Default for NetworkCheckOptions {
+    fn default() -> Self {
+        Self {
+            timeout: Duration::from_secs(5),
+        }
+    }
 }
 
 // ============================================================================

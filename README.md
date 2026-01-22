@@ -15,6 +15,7 @@ Protocol Buffers definitions.
   container wiring is implemented.
 - `check` in `src/main.rs` is a placeholder implementation.
 - Python and Kotlin init/codegen are not implemented yet.
+- Swift supports `echo` and `data-stream` templates.
 
 ## Requirements
 
@@ -58,10 +59,12 @@ cd my-service
 actr gen
 ```
 
-Create a Swift project (template: `echo` only):
+Create a Swift project:
 
 ```bash
 actr init my-app --signaling ws://127.0.0.1:8080 --language swift --template echo
+# Or use the data-stream template
+actr init my-app --signaling ws://127.0.0.1:8080 --language swift --template data-stream
 ```
 
 ## Commands
@@ -73,7 +76,7 @@ interactively.
 
 Flags:
 
-- `--template <name>`: project template (Swift supports `echo` only)
+- `--template <name>`: project template (echo, data-stream)
 - `--project-name <name>`: project name when initializing in the current directory
 - `--signaling <url>`: signaling server URL (required)
 - `-l, --language <rust|python|swift|kotlin>`: target language (default: `rust`)
@@ -126,6 +129,28 @@ Example:
 
 ```bash
 actr discovery --filter user-*
+```
+
+### `actr doc`
+
+Generate static HTML documentation for the project, including project overview, API (Proto) reference, and configuration guide.
+
+Flags:
+
+- `-o, --output <path>`: Output directory (default: `docs`)
+
+Example:
+
+```bash
+actr doc
+# Or specify output directory
+actr doc -o my-docs
+```
+
+After generation, you can preview the documentation locally:
+
+```bash
+python3 -m http.server --directory docs 8080
 ```
 
 ### `actr gen`

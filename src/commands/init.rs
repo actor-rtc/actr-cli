@@ -15,7 +15,7 @@ pub struct InitCommand {
     /// Name of the project to create (use '.' for current directory)
     pub name: Option<String>,
 
-    /// Project template to use (echo)
+    /// Project template to use (echo, data-stream)
     #[arg(long, default_value_t = ProjectTemplateName::Echo)]
     pub template: ProjectTemplateName,
 

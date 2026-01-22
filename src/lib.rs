@@ -2,6 +2,7 @@
 //!
 //! 提供 Actor-RTC CLI 工具的核心功能模块
 
+pub mod assets;
 pub mod commands;
 pub mod core;
 pub mod error;

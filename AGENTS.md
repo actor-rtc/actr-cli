@@ -24,6 +24,7 @@
 - Follow rustfmt defaults; do not hand-align.
 - Naming: `snake_case` for modules/functions/vars, `CamelCase` for types, `SCREAMING_SNAKE_CASE` for constants.
 - Keep CLI output strings in English and consistent with existing phrasing.
+- Logging: keep `tracing`/log output plain text (no ANSI color/highlight); user-facing stdout/stderr may use colors.
 - Prefer small modules and clear error handling using `anyhow`/`thiserror`.
 - When updating README content, keep `README.md` and `README.zh-CN.md` fully aligned in structure and information.
 

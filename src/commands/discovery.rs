@@ -8,8 +8,8 @@ use clap::Args;
 
 use crate::core::{
     ActrCliError, Command, CommandContext, CommandResult, ComponentType, ConfigManager,
-    DependencyResolver, DependencySpec, Fingerprint, FingerprintValidator, NetworkValidator,
-    ResolvedDependency, ServiceDetails, ServiceDiscovery, ServiceInfo,
+    DependencyResolver, DependencySpec, Fingerprint, FingerprintValidator, NetworkCheckOptions,
+    NetworkValidator, ResolvedDependency, ServiceDetails, ServiceDiscovery, ServiceInfo,
 };
 
 /// Discovery 命令
@@ -228,7 +228,10 @@ impl DiscoveryCommand {
             }
         }
 
-        match network_validator.check_connectivity(&service.name).await {
+        match network_validator
+            .check_connectivity(&service.name, &NetworkCheckOptions::default())
+            .await
+        {
             Ok(connectivity) => {
                 if connectivity.is_reachable {
                     println!("  ├─ ✅ Network connectivity");

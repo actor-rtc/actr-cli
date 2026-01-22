@@ -51,6 +51,7 @@ tokio = { version = "1.48.0", features = ["full"] }
 tracing = "0.1.43"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 owo-colors = "4.1.0"
+comfy-table = "7.1"
 
 # HTTP client for proto dependencies
 reqwest = { version = "0.12.24", features = ["stream"] }
@@ -77,6 +78,8 @@ chrono = { version = "0.4", features = ["serde"] }
 # Hashing for integrity verification
 md5 = "0.7"
 sha2 = "0.10"
+hex = "0.4"
+url = "2.5"
 
 # Protocol buffer generation
 prost-build = "0.14.1"
@@ -91,6 +94,7 @@ heck = "0.5.0"                                   # for case conversion
 tokio-tungstenite = { version = "0.28.0", features = ["native-tls"] }
 futures-util = "0.3.31"
 uuid = { version = "1.19.0", features = ["v4"] }
+rust-embed = "8.11.0"
 
 [dev-dependencies]
 tokio-test = "0.4"

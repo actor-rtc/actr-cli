@@ -161,13 +161,15 @@ impl ValidationPipeline {
 
         let dependency_validation = self.validate_dependencies(&dependency_specs).await?;
         let network_validation = self
-            .validate_network_connectivity(&resolved_dependencies)
+            .validate_network_connectivity(&resolved_dependencies, &NetworkCheckOptions::default())
             .await?;
         let fingerprint_validation = self.validate_fingerprints(&resolved_dependencies).await?;
 
         let is_valid = config_validation.is_valid
             && dependency_validation.iter().all(|d| d.is_available)
-            && network_validation.iter().all(|n| n.is_reachable)
+            && network_validation
+                .iter()
+                .all(|n| !n.is_applicable || n.is_reachable)
             && fingerprint_validation.iter().all(|f| f.is_valid)
             && conflicts.is_empty();
 
@@ -234,35 +236,55 @@ impl ValidationPipeline {
     }
 
     /// 网络连通性验证
-    async fn validate_network_connectivity(
+    pub async fn validate_network_connectivity(
         &self,
         deps: &[ResolvedDependency],
+        options: &NetworkCheckOptions,
     ) -> Result<Vec<NetworkValidation>> {
         let names = deps.iter().map(|d| d.spec.name.clone()).collect::<Vec<_>>();
-        let network_results = self.network_validator.batch_check(&names).await?;
+        let network_results = self.network_validator.batch_check(&names, options).await?;
 
         Ok(network_results
             .into_iter()
-            .map(|result| NetworkValidation {
-                is_reachable: result.connectivity.is_reachable,
-                health: result.health,
-                latency_ms: result.connectivity.response_time_ms,
-                error: result.connectivity.error,
+            .map(|result| {
+                let mut is_applicable = true;
+                let mut error = result.connectivity.error;
+                let mut health = result.health;
+                let mut latency_ms = result.connectivity.response_time_ms;
+
+                if let Some(ref message) = error
+                    && message.starts_with("Address resolution failed: Invalid address format")
+                {
+                    is_applicable = false;
+                    error =
+                        Some("Network check skipped: no endpoint address available".to_string());
+                    health = HealthStatus::Unknown;
+                    latency_ms = None;
+                }
+
+                NetworkValidation {
+                    is_reachable: result.connectivity.is_reachable,
+                    health,
+                    latency_ms,
+                    error,
+                    is_applicable,
+                }
             })
             .collect())
     }
 
     /// 指纹验证
-    async fn validate_fingerprints(
+    pub async fn validate_fingerprints(
         &self,
         deps: &[ResolvedDependency],
     ) -> Result<Vec<FingerprintValidation>> {
         let mut results = Vec::new();
 
         for dep in deps {
+            let expected_val = dep.spec.fingerprint.clone().unwrap_or_default();
             let expected = Fingerprint {
                 algorithm: "sha256".to_string(),
-                value: dep.fingerprint.clone(),
+                value: expected_val,
             };
 
             // 计算实际指纹（如果 resolved_dependencies 中没有指纹，从远程获取）

@@ -4,7 +4,7 @@
 
 use crate::core::{
     ActrCliError, Command, CommandContext, CommandResult, ComponentType, DependencySpec,
-    ErrorReporter, InstallResult,
+    ErrorReporter, InstallResult, NetworkCheckOptions,
 };
 use actr_config::LockFile;
 use actr_protocol::{ActrType, ActrTypeExt};
@@ -236,7 +236,7 @@ impl InstallCommand {
             let connectivity = install_pipeline
                 .validation_pipeline()
                 .network_validator()
-                .check_connectivity(package)
+                .check_connectivity(package, &NetworkCheckOptions::default())
                 .await?;
 
             if connectivity.is_reachable {
@@ -363,7 +363,7 @@ impl InstallCommand {
         let connectivity = install_pipeline
             .validation_pipeline()
             .network_validator()
-            .check_connectivity(&service_name)
+            .check_connectivity(&service_name, &NetworkCheckOptions::default())
             .await?;
 
         if connectivity.is_reachable {

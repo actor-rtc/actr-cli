@@ -13,6 +13,7 @@ actr-cli 是 Actor-RTC 框架项目的命令行工具，用于引导项目、管
   因此在容器接线完成前会报 “not registered” 类错误。
 - `src/main.rs` 中的 `check` 是占位实现。
 - Python 与 Kotlin 的 init/codegen 还未实现。
+- Swift 支持 `echo` 和 `data-stream` 模板。
 
 ## 环境要求
 
@@ -56,10 +57,12 @@ cd my-service
 actr gen
 ```
 
-创建 Swift 项目（模板仅支持 `echo`）：
+创建 Swift 项目：
 
 ```bash
 actr init my-app --signaling ws://127.0.0.1:8080 --language swift --template echo
+# 或者使用 data-stream 模板
+actr init my-app --signaling ws://127.0.0.1:8080 --language swift --template data-stream
 ```
 
 ## 命令
@@ -70,7 +73,7 @@ actr init my-app --signaling ws://127.0.0.1:8080 --language swift --template ech
 
 参数：
 
-- `--template <name>`：项目模板（Swift 仅支持 `echo`）
+- `--template <name>`：项目模板（支持 `echo` 和 `data-stream`）
 - `--project-name <name>`：在当前目录初始化时指定项目名
 - `--signaling <url>`：信令服务器地址（必填）
 - `-l, --language <rust|python|swift|kotlin>`：目标语言（默认：`rust`）
@@ -123,6 +126,28 @@ actr install actr://user-service@1.0.0/
 
 ```bash
 actr discovery --filter user-*
+```
+
+### `actr doc`
+
+生成项目的静态 HTML 文档，包含项目概览、API (Proto) 接口参考以及配置说明。
+
+参数：
+
+- `-o, --output <path>`：输出目录（默认：`docs`）
+
+示例：
+
+```bash
+actr doc
+# 指定输出目录
+actr doc -o my-docs
+```
+
+生成完成后，可以通过以下方式在本地预览：
+
+```bash
+python3 -m http.server --directory docs 8080
 ```
 
 ### `actr gen`

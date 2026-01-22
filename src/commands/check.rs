@@ -4,18 +4,16 @@
 //! and optionally verifies they match the configured dependencies.
 
 use crate::core::{
-    ActrCliError, AvailabilityStatus, Command, CommandContext, CommandResult, ComponentType,
-    ConnectivityStatus, HealthStatus, NetworkServiceDiscovery, ServiceDiscovery,
+    Command, CommandContext, CommandResult, ComponentType, DependencySpec, NetworkCheckOptions,
 };
-use actr_config::{Config, ConfigParser, LockFile};
-use anyhow::Result;
+use actr_config::ConfigParser;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use clap::Args;
-use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::Duration;
-use tracing::{debug, error, info};
+use comfy_table::{Attribute, Cell, Color, Table};
+use futures_util::future;
+use owo_colors::OwoColorize;
+use tracing::info;
 
 /// Check command - validates service availability
 #[derive(Args, Debug)]
@@ -50,315 +48,296 @@ pub struct CheckCommand {
 impl Command for CheckCommand {
     async fn execute(&self, context: &CommandContext) -> Result<CommandResult> {
         let config_path = self.config_file.as_deref().unwrap_or("Actr.toml");
-        let config_path = self.resolve_config_path(context, config_path);
-        let mut loaded_config: Option<Config> = None;
 
-        // Determine which service packages to check
-        let packages_to_check = if self.packages.is_empty() {
-            info!(
-                "🔍 Loading services from configuration: {}",
-                config_path.display()
-            );
-            let config = self.load_config(&config_path)?;
-            let packages = self.load_packages_from_config(&config, &config_path);
-            loaded_config = Some(config);
-            packages
-        } else {
-            info!("🔍 Checking provided services");
-            self.packages.clone()
+        let pipeline = {
+            let mut container = context.container.lock().unwrap();
+            container.get_validation_pipeline()?
         };
+        let options = NetworkCheckOptions::with_timeout_secs(self.timeout);
 
-        if packages_to_check.is_empty() {
-            info!("ℹ️ No services to check");
-            return Ok(CommandResult::Success("No services to check".to_string()));
+        println!("🔍 Starting dependency validation...");
+        info!("🔍 Starting dependency validation...");
+
+        // 1. Validate Config and Signaling Server
+        let config_validation = pipeline.config_manager().validate_config().await?;
+        if !config_validation.is_valid {
+            let mut msg = format!("{} Configuration validation failed:\n", "❌".red());
+            for err in config_validation.errors {
+                msg.push_str(&format!("  - {}\n", err.red()));
+            }
+            return Ok(CommandResult::Error(msg));
         }
 
-        let service_discovery =
-            self.resolve_service_discovery(context, &config_path, loaded_config.as_ref())?;
-        let (network_validator, fingerprint_validator) = {
-            let container = context.container.lock().unwrap();
-            (
-                container.get_network_validator()?,
-                container.get_fingerprint_validator()?,
-            )
-        };
+        let config = ConfigParser::from_file(config_path)
+            .with_context(|| format!("Failed to load config: {}", config_path))?;
 
-        // Use loaded_config directly if available, otherwise load from file if it exists
-        // Load config if not already loaded and file exists
-        if loaded_config.is_none() && config_path.exists() {
-            let config = self.load_config(&config_path)?;
-            loaded_config = Some(config);
-        }
-        let fingerprint_config = loaded_config.as_ref();
-        let expected_fingerprints = self.collect_expected_fingerprints(fingerprint_config);
-
-        let lock_file = if self.lock {
-            info!("🔒 Checking Actr.lock.toml");
-            Some(self.load_lock_file(&config_path)?)
+        println!(
+            "🌐 Checking signaling server: {}...",
+            config.signaling_url.as_str()
+        );
+        info!(
+            "🌐 Checking signaling server: {}...",
+            config.signaling_url.as_str()
+        );
+        let signaling_status = pipeline
+            .network_validator()
+            .check_connectivity(config.signaling_url.as_str(), &options)
+            .await?;
+        if signaling_status.is_reachable {
+            let latency = signaling_status.response_time_ms.unwrap_or(0);
+            println!("  ✔ Signaling server is reachable ({}ms)", latency);
+            info!("  ✔ Signaling server is reachable ({}ms)", latency);
         } else {
-            None
-        };
-        let lock_entries = lock_file
-            .as_ref()
-            .map(|lock| {
-                lock.dependencies
-                    .iter()
-                    .cloned()
-                    .map(|dep| (dep.name.clone(), dep))
-                    .collect::<HashMap<_, _>>()
+            let err = signaling_status
+                .error
+                .unwrap_or_else(|| "Unknown error".to_string());
+            return Ok(CommandResult::Error(format!(
+                "{} Signaling server unreachable: {}",
+                "❌".red(),
+                err.red()
+            )));
+        }
+
+        // 2. Resolve Dependencies to check
+
+        let all_specs: Vec<DependencySpec> = config
+            .dependencies
+            .iter()
+            .map(|d| DependencySpec {
+                alias: d.alias.clone(),
+                name: d.name.clone(),
+                actr_type: d.actr_type.clone(),
+                fingerprint: d.fingerprint.clone(),
             })
-            .unwrap_or_default();
+            .collect();
 
-        info!("📦 Checking {} services...", packages_to_check.len());
+        let specs_to_check = if self.packages.is_empty() {
+            all_specs
+        } else {
+            all_specs
+                .into_iter()
+                .filter(|s| self.packages.contains(&s.name) || self.packages.contains(&s.alias))
+                .collect()
+        };
 
-        let mut total_checked = 0;
-        let mut available_count = 0;
-        let mut unavailable_count = 0;
-        let mut network_failures = 0;
-        let mut fingerprint_mismatches = 0;
-        let mut lock_mismatches = 0;
-        let mut missing_in_lock: Vec<String> = Vec::new();
-        let mut results: Vec<ServiceCheckReport> = Vec::new();
-        let mut problem_services: HashSet<String> = HashSet::new();
+        if specs_to_check.is_empty() {
+            if self.packages.is_empty() {
+                return Ok(CommandResult::Success(
+                    "No dependencies to check".to_string(),
+                ));
+            } else {
+                return Ok(CommandResult::Error(format!(
+                    "None of the specified packages found in {}",
+                    config_path
+                )));
+            }
+        }
 
-        for package in &packages_to_check {
-            total_checked += 1;
-            let expected_fingerprint = expected_fingerprints.get(package).cloned();
-            let lock_entry = lock_entries.get(package);
+        // 3. Perform Validation via Pipeline
+        let dep_validations = pipeline.validate_dependencies(&specs_to_check).await?;
 
-            let mut report = ServiceCheckReport::new(package.clone());
-            report.fingerprint_expected = expected_fingerprint.clone();
+        // 3.1 Lock File Validation (if requested)
+        if self.lock {
+            println!("🔒 Verifying lock file integrity...");
+            info!("🔒 Verifying lock file integrity...");
+            let lock_path = std::path::Path::new("Actr.lock.toml");
+            if !lock_path.exists() {
+                return Ok(CommandResult::Error("Actr.lock.toml not found".to_string()));
+            }
 
-            let check_result = self
-                .check_service(package.as_str(), &service_discovery)
-                .await;
-            match check_result {
-                Ok(status) => {
-                    report.availability = Some(status.clone());
-                    if status.is_available {
-                        available_count += 1;
-                    } else {
-                        unavailable_count += 1;
-                        problem_services.insert(package.clone());
+            let lock_file = actr_config::LockFile::from_file(lock_path)
+                .map_err(|e| anyhow::anyhow!("Failed to read lock file: {}", e))?;
+
+            for spec in &specs_to_check {
+                if let Some(locked) = lock_file.get_dependency(&spec.name) {
+                    // Check if versions/types match if necessary
+                    if let Some(spec_fp) = &spec.fingerprint
+                        && spec_fp != &locked.fingerprint
+                    {
+                        return Ok(CommandResult::Error(format!(
+                            "{} Fingerprint mismatch for '{}' in lock file:\n  Expected: {}\n  Locked:   {}",
+                            "❌".red(),
+                            spec.alias,
+                            spec_fp,
+                            locked.fingerprint
+                        )));
                     }
+                } else {
+                    return Ok(CommandResult::Error(format!(
+                        "{} Dependency '{}' not found in Actr.lock.toml",
+                        "❌".red(),
+                        spec.alias
+                    )));
+                }
+            }
+            println!("  ✔ Lock file integrity verified");
+            info!("  ✔ Lock file integrity verified");
+        }
+
+        // For network and fingerprint, we need ResolvedDependency
+        // Use parallel fetch for service details to improve performance
+        let fetch_futures = specs_to_check.iter().map(|spec| {
+            let sd = pipeline.service_discovery().clone();
+            let name = spec.name.clone();
+            async move {
+                let details = sd.get_service_details(&name).await;
+                (name, details)
+            }
+        });
+
+        let fetch_results = future::join_all(fetch_futures).await;
+
+        let mut service_details_map = std::collections::HashMap::new();
+        let mut fetch_errors: Vec<(String, anyhow::Error)> = Vec::new();
+
+        for (name, result) in fetch_results {
+            match result {
+                Ok(details) => {
+                    service_details_map.insert(name, details);
                 }
                 Err(e) => {
-                    report.availability_error = Some(e.to_string());
-                    unavailable_count += 1;
-                    problem_services.insert(package.clone());
+                    fetch_errors.push((name, e));
                 }
-            }
-
-            if report.is_available() {
-                report.connectivity_checked = true;
-                match network_validator.check_connectivity(package).await {
-                    Ok(connectivity) => {
-                        if !connectivity.is_reachable {
-                            network_failures += 1;
-                            problem_services.insert(package.clone());
-                        }
-                        report.connectivity = Some(connectivity);
-                    }
-                    Err(e) => {
-                        network_failures += 1;
-                        problem_services.insert(package.clone());
-                        report.connectivity_error = Some(e.to_string());
-                    }
-                }
-            }
-
-            // Fetch fingerprint if verbose, expected fingerprint exists, or lock check is enabled
-            let should_fetch_fingerprint =
-                self.verbose || report.fingerprint_expected.is_some() || self.lock;
-            if should_fetch_fingerprint && report.is_available() {
-                report.fingerprint_checked = true;
-                match service_discovery.get_service_details(package).await {
-                    Ok(details) => match fingerprint_validator
-                        .compute_service_fingerprint(&details.info)
-                        .await
-                    {
-                        Ok(actual) => {
-                            report.fingerprint_actual = Some(actual.value);
-                        }
-                        Err(e) => {
-                            report.fingerprint_error = Some(e.to_string());
-                        }
-                    },
-                    Err(e) => {
-                        report.fingerprint_error = Some(e.to_string());
-                    }
-                }
-            }
-
-            if let (Some(expected), Some(actual)) = (
-                report.fingerprint_expected.as_deref(),
-                report.fingerprint_actual.as_deref(),
-            ) {
-                let matched = expected == actual;
-                report.fingerprint_match = Some(matched);
-                if !matched {
-                    fingerprint_mismatches += 1;
-                    problem_services.insert(package.clone());
-                }
-            }
-
-            if self.lock {
-                report.lock_detail.checked = true;
-                if let Some(lock_entry) = lock_entry {
-                    report.lock_detail.present = true;
-                    report.lock_detail.fingerprint = Some(lock_entry.fingerprint.clone());
-                    if let Some(actual) = report.fingerprint_actual.as_deref() {
-                        let matched = lock_entry.fingerprint == actual;
-                        report.lock_detail.is_match = Some(matched);
-                        if !matched {
-                            lock_mismatches += 1;
-                            problem_services.insert(package.clone());
-                        }
-                    }
-                } else {
-                    missing_in_lock.push(package.clone());
-                    problem_services.insert(package.clone());
-                }
-            }
-
-            results.push(report);
-        }
-
-        // Summary
-        info!("");
-        info!("📊 Service Check Summary:");
-        info!("   Total checked: {}", total_checked);
-        info!("   ✅ Available: {}", available_count);
-        info!("   ❌ Unavailable: {}", unavailable_count);
-        info!("   🌐 Network failures: {}", network_failures);
-        info!("   🔐 Fingerprint mismatches: {}", fingerprint_mismatches);
-        if self.lock {
-            info!("   🔒 Missing in Actr.lock.toml: {}", missing_in_lock.len());
-            info!("   🔒 Lock mismatches: {}", lock_mismatches);
-        }
-
-        // Detailed output if verbose
-        if self.verbose {
-            info!("");
-            info!("📋 Detailed Results:");
-            for report in &results {
-                info!("   🔎 [{}]", report.name);
-                match (&report.availability, &report.availability_error) {
-                    (Some(status), _) => {
-                        if status.is_available {
-                            info!("      Availability: available");
-                        } else {
-                            info!("      Availability: unavailable");
-                        }
-                        info!("      Health: {}", format_health(&status.health));
-                    }
-                    (None, Some(error_msg)) => {
-                        info!("      Availability: error ({})", error_msg);
-                    }
-                    _ => {
-                        info!("      Availability: unknown");
-                    }
-                }
-
-                if report.connectivity_checked {
-                    if let Some(connectivity) = &report.connectivity {
-                        let latency = connectivity
-                            .response_time_ms
-                            .map(|value| format!("{value}ms"))
-                            .unwrap_or_else(|| "unknown".to_string());
-                        let reachability = if connectivity.is_reachable {
-                            "reachable"
-                        } else {
-                            "unreachable"
-                        };
-                        info!(
-                            "      Connectivity: {} (latency: {})",
-                            reachability, latency
-                        );
-                        if let Some(error) = connectivity.error.as_deref() {
-                            info!("      Connectivity error: {}", error);
-                        }
-                    } else if let Some(error) = report.connectivity_error.as_deref() {
-                        info!("      Connectivity: error ({})", error);
-                    } else {
-                        info!("      Connectivity: unknown");
-                    }
-                } else {
-                    info!("      Connectivity: skipped");
-                }
-
-                if report.fingerprint_checked || report.fingerprint_expected.is_some() {
-                    let expected = report.fingerprint_expected.as_deref().unwrap_or("-");
-                    let actual = report.fingerprint_actual.as_deref().unwrap_or("-");
-                    let matched = match report.fingerprint_match {
-                        Some(true) => "match",
-                        Some(false) => "mismatch",
-                        None => "unknown",
-                    };
-                    info!(
-                        "      Fingerprint: expected={} actual={} match={}",
-                        expected, actual, matched
-                    );
-                    if let Some(error) = report.fingerprint_error.as_deref() {
-                        info!("      Fingerprint error: {}", error);
-                    }
-                } else {
-                    info!("      Fingerprint: skipped");
-                }
-
-                info!("      Lock: {}", format_lock_detail(&report.lock_detail));
             }
         }
 
-        if !problem_services.is_empty() {
-            let mut problems = Vec::new();
-            if unavailable_count > 0 {
-                problems.push(format!("{} services are unavailable", unavailable_count));
-            }
-            if network_failures > 0 {
-                problems.push(format!(
-                    "{} services failed network checks",
-                    network_failures
-                ));
-            }
-            if fingerprint_mismatches > 0 {
-                problems.push(format!(
-                    "{} services failed fingerprint checks",
-                    fingerprint_mismatches
-                ));
-            }
-            if self.lock && !missing_in_lock.is_empty() {
-                problems.push(format!(
-                    "{} services are missing from Actr.lock.toml",
-                    missing_in_lock.len()
-                ));
-            }
-            if self.lock && lock_mismatches > 0 {
-                problems.push(format!("{} services failed lock checks", lock_mismatches));
-            }
-            let message = if problems.is_empty() {
-                "Service checks failed".to_string()
+        let resolved_deps: Vec<_> = specs_to_check
+            .iter()
+            .map(|spec| {
+                let details = service_details_map.get(&spec.name);
+                crate::core::ResolvedDependency {
+                    spec: spec.clone(),
+                    fingerprint: details
+                        .map(|d| d.info.fingerprint.clone())
+                        .unwrap_or_default(),
+                    proto_files: details.map(|d| d.proto_files.clone()).unwrap_or_default(),
+                }
+            })
+            .collect();
+
+        let net_validations = pipeline
+            .validate_network_connectivity(&resolved_deps, &options)
+            .await?;
+        let fp_validations = pipeline.validate_fingerprints(&resolved_deps).await?;
+
+        // 4. Report Results
+        let mut table = Table::new();
+        table.set_header(vec![
+            Cell::new("Dependency").add_attribute(Attribute::Bold),
+            Cell::new("Availability").add_attribute(Attribute::Bold),
+            Cell::new("Network").add_attribute(Attribute::Bold),
+            Cell::new("Fingerprint").add_attribute(Attribute::Bold),
+        ]);
+
+        let mut all_ok = true;
+
+        for i in 0..specs_to_check.len() {
+            let spec = &specs_to_check[i];
+            let dep_v = &dep_validations[i];
+            let net_v = &net_validations[i];
+            let fp_v = &fp_validations[i];
+
+            let mut row = vec![Cell::new(&spec.alias)];
+
+            // Availability
+            if dep_v.is_available {
+                row.push(Cell::new("✔ Available").fg(Color::Green));
             } else {
-                problems.join(", ")
-            };
-            error!("⚠️ {message}");
-            return Err(ActrCliError::Dependency { message }.into());
+                let err_msg = if self.verbose {
+                    dep_v.error.as_deref().unwrap_or("Unknown error")
+                } else {
+                    "Missing"
+                };
+                row.push(Cell::new(format!("✘ {}", err_msg)).fg(Color::Red));
+                all_ok = false;
+            }
+
+            // Network
+            if !net_v.is_applicable {
+                let cell_text = if self.verbose {
+                    net_v.error.clone().unwrap_or_else(|| "N/A".to_string())
+                } else {
+                    "N/A".to_string()
+                };
+                row.push(Cell::new(cell_text).fg(Color::Yellow));
+            } else if net_v.is_reachable {
+                let latency = net_v
+                    .latency_ms
+                    .map(|l| format!(" ({}ms)", l))
+                    .unwrap_or_default();
+                row.push(Cell::new(format!("✔ Reachable{}", latency)).fg(Color::Green));
+            } else {
+                // If service detail fetch failed earlier, network check will likely fail too.
+                // Check if we had a fetch error for this service
+                let fetch_err = fetch_errors
+                    .iter()
+                    .find(|(n, _)| n == &spec.name)
+                    .map(|(_, e)| e.to_string());
+
+                let err_display = if self.verbose {
+                    if let Some(fe) = fetch_err {
+                        format!("Fetch Error: {}", fe)
+                    } else {
+                        net_v
+                            .error
+                            .clone()
+                            .unwrap_or_else(|| "Unreachable".to_string())
+                    }
+                } else {
+                    "✘ Unreachable".to_string()
+                };
+
+                row.push(Cell::new(err_display).fg(Color::Red));
+                all_ok = false;
+            }
+
+            // Fingerprint
+            if fp_v.is_valid {
+                row.push(Cell::new("✔ Match").fg(Color::Green));
+            } else {
+                let mut cell_text = "✘ Mismatch".to_string();
+                if self.verbose {
+                    let expected = &fp_v.expected.value;
+                    let actual_opt = fp_v.actual.as_ref().map(|f| &f.value);
+
+                    if let Some(actual) = actual_opt {
+                        if !expected.is_empty() {
+                            cell_text = format!(
+                                "✘ Mismatch\n  Exp: {:.8}...\n  Act: {:.8}...",
+                                expected, actual
+                            );
+                        }
+                    } else if let Some(err) = &fp_v.error {
+                        cell_text = format!("✘ Error: {}", err);
+                    }
+                }
+                row.push(Cell::new(cell_text).fg(Color::Red));
+                all_ok = false;
+            }
+
+            table.add_row(row);
         }
 
-        if self.lock {
-            info!("🎉 All services passed checks and match Actr.lock.toml!");
+        println!("\n{table}");
+
+        if all_ok {
+            Ok(CommandResult::Success(format!(
+                "\n{} All {} services passed validation!",
+                "✨".green(),
+                specs_to_check.len()
+            )))
         } else {
-            info!("🎉 All services passed availability checks!");
+            Ok(CommandResult::Error(format!(
+                "\n{} Some services failed validation. Run with --verbose for details.",
+                "⚠️".yellow()
+            )))
         }
-
-        Ok(CommandResult::Success(format!(
-            "Checked {} services, all available",
-            total_checked
-        )))
     }
 
     fn required_components(&self) -> Vec<ComponentType> {
         vec![
+            ComponentType::ConfigManager,
+            ComponentType::DependencyResolver,
             ComponentType::ServiceDiscovery,
             ComponentType::NetworkValidator,
             ComponentType::FingerprintValidator,
@@ -370,240 +349,6 @@ impl Command for CheckCommand {
     }
 
     fn description(&self) -> &str {
-        "Validate that services are available in the registry"
-    }
-}
-
-impl CheckCommand {
-    fn resolve_config_path(&self, context: &CommandContext, config_path: &str) -> PathBuf {
-        let path = Path::new(config_path);
-        if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            context.working_dir.join(path)
-        }
-    }
-
-    fn load_config(&self, config_path: &Path) -> Result<Config> {
-        Ok(
-            ConfigParser::from_file(config_path).map_err(|e| ActrCliError::Config {
-                message: format!("Failed to load config {}: {e}", config_path.display()),
-            })?,
-        )
-    }
-
-    /// Load service names from configuration file
-    fn load_packages_from_config(&self, config: &Config, config_path: &Path) -> Vec<String> {
-        let mut packages = Vec::new();
-
-        for dependency in &config.dependencies {
-            packages.push(dependency.name.clone());
-            debug!(
-                "Added service: {} (alias: {})",
-                dependency.name, dependency.alias
-            );
-        }
-
-        if packages.is_empty() {
-            info!(
-                "ℹ️ No dependencies found in configuration file: {}",
-                config_path.display()
-            );
-        } else {
-            info!("📋 Found {} services in configuration", packages.len());
-        }
-
-        packages
-    }
-
-    fn resolve_service_discovery(
-        &self,
-        context: &CommandContext,
-        config_path: &Path,
-        config: Option<&Config>,
-    ) -> Result<Arc<dyn ServiceDiscovery>> {
-        if self.config_file.is_some() {
-            let config = match config {
-                Some(config) => config.clone(),
-                None => self.load_config(config_path)?,
-            };
-            return Ok(Arc::new(NetworkServiceDiscovery::new(config)));
-        }
-
-        let container = context.container.lock().unwrap();
-        match container.get_service_discovery() {
-            Ok(service_discovery) => Ok(service_discovery),
-            Err(_) => {
-                let config = match config {
-                    Some(config) => config.clone(),
-                    None => self.load_config(config_path)?,
-                };
-                Ok(Arc::new(NetworkServiceDiscovery::new(config)))
-            }
-        }
-    }
-
-    fn collect_expected_fingerprints(&self, config: Option<&Config>) -> HashMap<String, String> {
-        let mut expected = HashMap::new();
-        if let Some(config) = config {
-            for dependency in &config.dependencies {
-                if let Some(fingerprint) = dependency.fingerprint.as_ref()
-                    && !fingerprint.is_empty()
-                {
-                    expected.insert(dependency.name.clone(), fingerprint.clone());
-                }
-            }
-        }
-        expected
-    }
-
-    fn load_lock_file(&self, config_path: &Path) -> Result<LockFile> {
-        let lock_file_path = config_path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .join("Actr.lock.toml");
-
-        if !lock_file_path.exists() {
-            return Err(ActrCliError::Config {
-                message: format!("Lock file not found: {}", lock_file_path.display()),
-            }
-            .into());
-        }
-
-        let lock_file = LockFile::from_file(&lock_file_path).map_err(|e| ActrCliError::Config {
-            message: format!("Failed to load lock file {}: {e}", lock_file_path.display()),
-        })?;
-        Ok(lock_file)
-    }
-
-    /// Check service availability using ServiceDiscovery
-    async fn check_service(
-        &self,
-        service_name: &str,
-        service_discovery: &Arc<dyn ServiceDiscovery>,
-    ) -> Result<AvailabilityStatus> {
-        debug!("Checking service availability: {}", service_name);
-
-        let status = if self.timeout == 0 {
-            service_discovery
-                .check_service_availability(service_name)
-                .await?
-        } else {
-            let duration = Duration::from_secs(self.timeout);
-            match tokio::time::timeout(
-                duration,
-                service_discovery.check_service_availability(service_name),
-            )
-            .await
-            {
-                Ok(result) => result?,
-                Err(_) => {
-                    return Err(ActrCliError::Network {
-                        message: format!(
-                            "Timeout after {}s while checking {}",
-                            self.timeout, service_name
-                        ),
-                    }
-                    .into());
-                }
-            }
-        };
-
-        Ok(status)
-    }
-}
-
-struct ServiceCheckReport {
-    name: String,
-    availability: Option<AvailabilityStatus>,
-    availability_error: Option<String>,
-    connectivity_checked: bool,
-    connectivity: Option<ConnectivityStatus>,
-    connectivity_error: Option<String>,
-    fingerprint_checked: bool,
-    fingerprint_expected: Option<String>,
-    fingerprint_actual: Option<String>,
-    fingerprint_match: Option<bool>,
-    fingerprint_error: Option<String>,
-    lock_detail: LockCheckDetail,
-}
-
-impl ServiceCheckReport {
-    fn new(name: String) -> Self {
-        Self {
-            name,
-            availability: None,
-            availability_error: None,
-            connectivity_checked: false,
-            connectivity: None,
-            connectivity_error: None,
-            fingerprint_checked: false,
-            fingerprint_expected: None,
-            fingerprint_actual: None,
-            fingerprint_match: None,
-            fingerprint_error: None,
-            lock_detail: LockCheckDetail::skipped(),
-        }
-    }
-
-    fn is_available(&self) -> bool {
-        self.availability
-            .as_ref()
-            .map(|status| status.is_available)
-            .unwrap_or(false)
-    }
-}
-
-struct LockCheckDetail {
-    checked: bool,
-    present: bool,
-    fingerprint: Option<String>,
-    is_match: Option<bool>,
-    error: Option<String>,
-}
-
-impl LockCheckDetail {
-    fn skipped() -> Self {
-        Self {
-            checked: false,
-            present: false,
-            fingerprint: None,
-            is_match: None,
-            error: None,
-        }
-    }
-}
-
-fn format_health(health: &HealthStatus) -> &'static str {
-    match health {
-        HealthStatus::Healthy => "healthy",
-        HealthStatus::Degraded => "degraded",
-        HealthStatus::Unhealthy => "unhealthy",
-        HealthStatus::Unknown => "unknown",
-    }
-}
-
-fn format_lock_detail(detail: &LockCheckDetail) -> String {
-    if !detail.checked {
-        return "skipped".to_string();
-    }
-    if !detail.present {
-        return "missing".to_string();
-    }
-
-    let fingerprint = detail.fingerprint.as_deref().unwrap_or("-");
-    let matched = match detail.is_match {
-        Some(true) => "match",
-        Some(false) => "mismatch",
-        None => "unknown",
-    };
-
-    if let Some(error) = detail.error.as_deref() {
-        format!(
-            "present (fingerprint={}, match={}, error={})",
-            fingerprint, matched, error
-        )
-    } else {
-        format!("present (fingerprint={}, match={})", fingerprint, matched)
+        "Validate project dependencies and service availability"
     }
 }
