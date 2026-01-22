@@ -1,5 +1,6 @@
 use crate::commands::codegen::traits::{GenContext, LanguageGenerator};
 use crate::error::{ActrCliError, Result};
+use crate::plugin_config::{compare_versions, load_protoc_plugin_config, version_is_at_least};
 use crate::utils::{command_exists, to_pascal_case};
 use actr_config::LockFile;
 use async_trait::async_trait;
@@ -36,7 +37,7 @@ impl LanguageGenerator for SwiftGenerator {
         info!("🔧 Generating Swift infrastructure code...");
         let mut generated_files = Vec::new();
 
-        self.ensure_required_tools()?;
+        self.ensure_required_tools(context)?;
 
         // Ensure output directory exists
         std::fs::create_dir_all(&context.output).map_err(|e| {
@@ -434,7 +435,7 @@ impl LanguageGenerator for SwiftGenerator {
 }
 
 impl SwiftGenerator {
-    fn ensure_required_tools(&self) -> Result<()> {
+    fn ensure_required_tools(&self, context: &GenContext) -> Result<()> {
         // 1. Ensure protoc is available.
         let mut missing_tools: Vec<(&str, &str)> = Vec::new();
         if !command_exists(PROTOC) {
@@ -469,7 +470,7 @@ impl SwiftGenerator {
 
         // 3. Check version compatibility for protoc-gen-actrframework-swift
         if command_exists(PROTOC_GEN_ACTR_FRAMEWORK_SWIFT) {
-            self.check_and_update_plugin_version()?;
+            self.check_and_update_plugin_version(context)?;
         }
 
         if missing_tools.is_empty() {
@@ -738,12 +739,52 @@ impl SwiftGenerator {
     }
 
     /// Check installed protoc-gen-actrframework-swift version and ensure it matches actr version
-    fn check_and_update_plugin_version(&self) -> Result<()> {
+    fn check_and_update_plugin_version(&self, context: &GenContext) -> Result<()> {
         let actr_version = env!("CARGO_PKG_VERSION");
+        let min_version =
+            self.resolve_plugin_min_version(context, PROTOC_GEN_ACTR_FRAMEWORK_SWIFT)?;
         let plugin_version = self.get_plugin_version()?;
 
-        if let Some(plugin_ver) = plugin_version {
-            match self.compare_versions(&plugin_ver, actr_version) {
+        match (min_version, plugin_version) {
+            (Some(min_version), Some(plugin_ver)) => {
+                if version_is_at_least(&plugin_ver, &min_version) {
+                    debug!(
+                        "✅ protoc-gen-actrframework-swift version {} meets minimum version {}",
+                        plugin_ver, min_version
+                    );
+                    return Ok(());
+                }
+
+                warn!(
+                    "⚠️  protoc-gen-actrframework-swift version {} is lower than minimum version {}",
+                    plugin_ver, min_version
+                );
+                self.try_update_plugin()?;
+                let updated_version = self.get_plugin_version()?;
+                if let Some(updated_ver) = updated_version {
+                    if version_is_at_least(&updated_ver, &min_version) {
+                        info!(
+                            "✅ Successfully updated protoc-gen-actrframework-swift to version {}",
+                            updated_ver
+                        );
+                        return Ok(());
+                    }
+                    return Err(ActrCliError::command_error(format!(
+                        "protoc-gen-actrframework-swift version {} is still lower than minimum version {} after update. Please manually update it.",
+                        updated_ver, min_version
+                    )));
+                }
+                return Err(ActrCliError::command_error(
+                    "Failed to get protoc-gen-actrframework-swift version after update".to_string(),
+                ));
+            }
+            (Some(min_version), None) => {
+                return Err(ActrCliError::command_error(format!(
+                    "Could not determine protoc-gen-actrframework-swift version (minimum required: {}).",
+                    min_version
+                )));
+            }
+            (None, Some(plugin_ver)) => match compare_versions(&plugin_ver, actr_version) {
                 std::cmp::Ordering::Equal => {
                     debug!(
                         "✅ protoc-gen-actrframework-swift version {} matches actr version {}",
@@ -756,12 +797,10 @@ impl SwiftGenerator {
                         "⚠️  protoc-gen-actrframework-swift version {} is lower than actr version {}",
                         plugin_ver, actr_version
                     );
-                    // Try to update
                     self.try_update_plugin()?;
-                    // Check version again after update
                     let updated_version = self.get_plugin_version()?;
                     if let Some(updated_ver) = updated_version {
-                        match self.compare_versions(&updated_ver, actr_version) {
+                        match compare_versions(&updated_ver, actr_version) {
                             std::cmp::Ordering::Equal => {
                                 info!(
                                     "✅ Successfully updated protoc-gen-actrframework-swift to version {}",
@@ -795,12 +834,12 @@ impl SwiftGenerator {
                         plugin_ver, actr_version
                     )));
                 }
+            },
+            (None, None) => {
+                warn!(
+                    "Could not determine protoc-gen-actrframework-swift version, skipping version check"
+                );
             }
-        } else {
-            // Version check failed, but tool exists - warn but don't fail
-            warn!(
-                "Could not determine protoc-gen-actrframework-swift version, skipping version check"
-            );
         }
 
         Ok(())
@@ -836,30 +875,23 @@ impl SwiftGenerator {
         }
     }
 
-    /// Compare two version strings (e.g., "0.1.10" vs "0.1.15")
-    fn compare_versions(&self, v1: &str, v2: &str) -> std::cmp::Ordering {
-        let parse_version = |v: &str| -> Vec<u32> {
-            v.split('.')
-                .map(|s| s.parse::<u32>().unwrap_or(0))
-                .collect()
-        };
-
-        let v1_parts = parse_version(v1);
-        let v2_parts = parse_version(v2);
-
-        // Compare each part
-        let max_len = v1_parts.len().max(v2_parts.len());
-        for i in 0..max_len {
-            let v1_part = v1_parts.get(i).copied().unwrap_or(0);
-            let v2_part = v2_parts.get(i).copied().unwrap_or(0);
-
-            match v1_part.cmp(&v2_part) {
-                std::cmp::Ordering::Equal => continue,
-                other => return other,
-            }
+    fn resolve_plugin_min_version(
+        &self,
+        context: &GenContext,
+        plugin_name: &str,
+    ) -> Result<Option<String>> {
+        let config = load_protoc_plugin_config(&context.config_path)?;
+        if let Some(config) = config
+            && let Some(min_version) = config.min_version(plugin_name)
+        {
+            info!(
+                "🔧 Using minimum version for {} from {}",
+                plugin_name,
+                config.path().display()
+            );
+            return Ok(Some(min_version.to_string()));
         }
-
-        std::cmp::Ordering::Equal
+        Ok(None)
     }
 
     /// Try to update protoc-gen-actrframework-swift via Homebrew

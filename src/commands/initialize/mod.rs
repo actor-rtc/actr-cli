@@ -14,6 +14,28 @@ use swift::SwiftInitializer;
 
 pub use traits::{InitContext, ProjectInitializer};
 
+/// Create .protoc-plugin.toml with default minimum versions.
+pub fn create_protoc_plugin_config(project_dir: &Path) -> Result<()> {
+    const DEFAULT_PLUGIN_MIN_VERSION: &str = "0.1.10";
+
+    let config_path = project_dir.join(".protoc-plugin.toml");
+    if config_path.exists() {
+        return Ok(());
+    }
+
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = format!(
+        "version = 1\n\n[plugins]\nprotoc-gen-actrframework = \"{DEFAULT_PLUGIN_MIN_VERSION}\"\nprotoc-gen-actrframework-swift = \"{DEFAULT_PLUGIN_MIN_VERSION}\"\n"
+    );
+
+    std::fs::write(&config_path, content)?;
+    tracing::info!("📄 Created .protoc-plugin.toml");
+    Ok(())
+}
+
 /// Generate a local.proto file with the given package name
 pub fn create_local_proto(
     project_dir: &Path,

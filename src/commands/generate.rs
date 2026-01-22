@@ -9,6 +9,7 @@ use crate::commands::Command;
 use crate::commands::SupportedLanguage;
 use crate::commands::codegen::{GenContext, execute_codegen};
 use crate::error::{ActrCliError, Result};
+use crate::plugin_config::{load_protoc_plugin_config, version_is_at_least};
 use crate::utils::to_pascal_case;
 // 只导入必要的类型，避免拉入不需要的依赖如 sqlite
 // use actr_framework::prelude::*;
@@ -87,6 +88,7 @@ impl Command for GenCommand {
                 proto_files,
                 input_path: self.input.clone(),
                 output,
+                config_path: self.config.clone(),
                 config: config.clone(),
                 no_scaffold: self.no_scaffold,
                 overwrite_user_code: self.overwrite_user_code,
@@ -353,28 +355,29 @@ impl GenCommand {
 
     /// 确保 protoc-gen-actrframework 插件可用
     ///
-    /// 版本管理策略：
-    /// 1. 检查系统已安装版本
-    /// 2. 如果版本匹配 → 直接使用
-    /// 3. 如果版本不匹配或未安装 → 自动安装/升级
-    ///
-    /// 这种策略确保：
-    /// - 版本一致性：插件版本始终与 CLI 匹配
-    /// - 自动管理：无需手动安装或升级
-    /// - 简单明确：只看版本，不区分开发/生产环境
+    /// Plugin version policy:
+    /// 1. Check installed version first.
+    /// 2. If `.protoc-plugin.toml` defines a minimum version, accept any version >= minimum.
+    /// 3. Otherwise, require an exact match with the CLI version.
+    /// 4. If missing or below requirement, install/upgrade automatically.
     fn ensure_protoc_plugin(&self) -> Result<PathBuf> {
         // Expected version (same as actr-framework-protoc-codegen)
         const EXPECTED_VERSION: &str = env!("CARGO_PKG_VERSION");
+        const PLUGIN_NAME: &str = "protoc-gen-actrframework";
+
+        let min_version = self.resolve_plugin_min_version(PLUGIN_NAME)?;
+        let require_exact = min_version.is_none();
+        let required_version = min_version.unwrap_or_else(|| EXPECTED_VERSION.to_string());
 
         // 1. Check installed version
         let installed_version = self.check_installed_plugin_version()?;
 
         match installed_version {
-            Some(version) if version == EXPECTED_VERSION => {
+            Some(version) if self.version_satisfies(&version, &required_version, require_exact) => {
                 // Version matches, use it directly
                 info!("✅ Using installed protoc-gen-actrframework v{}", version);
                 let output = StdCommand::new("which")
-                    .arg("protoc-gen-actrframework")
+                    .arg(PLUGIN_NAME)
                     .output()
                     .map_err(|e| {
                         ActrCliError::command_error(format!("Failed to locate plugin: {e}"))
@@ -385,17 +388,28 @@ impl GenCommand {
             }
             Some(version) => {
                 // Version mismatch, upgrade needed
-                info!(
-                    "🔄 Version mismatch: installed v{}, need v{}",
-                    version, EXPECTED_VERSION
-                );
+                if require_exact {
+                    info!(
+                        "🔄 Version mismatch: installed v{}, need v{}",
+                        version, required_version
+                    );
+                } else {
+                    info!(
+                        "🔄 Version below minimum: installed v{}, need >= v{}",
+                        version, required_version
+                    );
+                }
                 info!("🔨 Upgrading plugin...");
-                self.install_or_upgrade_plugin()
+                let path = self.install_or_upgrade_plugin()?;
+                self.ensure_required_plugin_version(&required_version, require_exact)?;
+                Ok(path)
             }
             None => {
                 // Not installed, install it
                 info!("📦 protoc-gen-actrframework not found, installing...");
-                self.install_or_upgrade_plugin()
+                let path = self.install_or_upgrade_plugin()?;
+                self.ensure_required_plugin_version(&required_version, require_exact)?;
+                Ok(path)
             }
         }
     }
@@ -508,6 +522,59 @@ impl GenCommand {
             .trim()
             .to_string();
         Ok(PathBuf::from(path))
+    }
+
+    fn resolve_plugin_min_version(&self, plugin_name: &str) -> Result<Option<String>> {
+        let config = load_protoc_plugin_config(&self.config)?;
+        if let Some(config) = config
+            && let Some(min_version) = config.min_version(plugin_name)
+        {
+            info!(
+                "🔧 Using minimum version for {} from {}",
+                plugin_name,
+                config.path().display()
+            );
+            return Ok(Some(min_version.to_string()));
+        }
+        Ok(None)
+    }
+
+    fn version_satisfies(&self, installed: &str, required: &str, strict_equal: bool) -> bool {
+        if strict_equal {
+            installed == required
+        } else {
+            version_is_at_least(installed, required)
+        }
+    }
+
+    fn ensure_required_plugin_version(
+        &self,
+        required_version: &str,
+        strict_equal: bool,
+    ) -> Result<()> {
+        let installed_version = self.check_installed_plugin_version()?;
+        let Some(installed_version) = installed_version else {
+            return Err(ActrCliError::command_error(
+                "Failed to determine installed protoc-gen-actrframework version after install"
+                    .to_string(),
+            ));
+        };
+
+        if self.version_satisfies(&installed_version, required_version, strict_equal) {
+            return Ok(());
+        }
+
+        if strict_equal {
+            Err(ActrCliError::command_error(format!(
+                "protoc-gen-actrframework version {} does not match required version {}",
+                installed_version, required_version
+            )))
+        } else {
+            Err(ActrCliError::command_error(format!(
+                "protoc-gen-actrframework version {} is lower than minimum version {}",
+                installed_version, required_version
+            )))
+        }
     }
 
     /// 生成基础设施代码

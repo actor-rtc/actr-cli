@@ -1,4 +1,4 @@
-use super::{InitContext, ProjectInitializer};
+use super::{InitContext, ProjectInitializer, create_protoc_plugin_config};
 
 use crate::commands::SupportedLanguage;
 use crate::error::Result;
@@ -16,6 +16,8 @@ impl ProjectInitializer for PythonInitializer {
         let template_context =
             TemplateContext::new(&context.project_name, &context.signaling_url, service_name);
         template.generate(&context.project_dir, &template_context)?;
+        create_protoc_plugin_config(&context.project_dir.join("server"))?;
+        create_protoc_plugin_config(&context.project_dir.join("client"))?;
 
         // Note: Proto files are now created via templates:
         //   - server/protos/local/echo.proto (service definition)

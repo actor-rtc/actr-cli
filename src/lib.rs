@@ -6,6 +6,7 @@ pub mod assets;
 pub mod commands;
 pub mod core;
 pub mod error;
+pub mod plugin_config;
 pub mod templates;
 pub use templates as template;
 pub mod utils;

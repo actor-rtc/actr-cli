@@ -440,6 +440,8 @@ test = "cargo test"
         self.create_actr_config(project_dir, project_name, signaling_url)?;
         info!("📄 Created Actr.toml configuration");
 
+        initialize::create_protoc_plugin_config(project_dir)?;
+
         // Enhance Cargo.toml with Actor-RTC dependencies
         self.enhance_cargo_toml_with_actr_deps(project_dir)?;
         info!("📦 Enhanced Cargo.toml with Actor-RTC dependencies");

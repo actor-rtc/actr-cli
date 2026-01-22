@@ -1,4 +1,4 @@
-use super::{InitContext, ProjectInitializer, create_local_proto};
+use super::{InitContext, ProjectInitializer, create_local_proto, create_protoc_plugin_config};
 use crate::commands::SupportedLanguage;
 use crate::error::{ActrCliError, Result};
 use crate::template::{ProjectTemplate, TemplateContext};
@@ -29,6 +29,7 @@ impl ProjectInitializer for SwiftInitializer {
         .await;
 
         template.generate(&context.project_dir, &template_context)?;
+        create_protoc_plugin_config(&context.project_dir)?;
 
         // Create local.proto file
         create_local_proto(

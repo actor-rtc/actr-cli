@@ -21,6 +21,7 @@ pub struct GenContext {
     pub proto_files: Vec<PathBuf>,
     pub input_path: PathBuf,
     pub output: PathBuf,
+    pub config_path: PathBuf,
     pub config: Config,
     pub no_scaffold: bool,
     pub overwrite_user_code: bool,
