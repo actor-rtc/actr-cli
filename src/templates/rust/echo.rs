@@ -18,7 +18,7 @@ pub fn load(files: &mut HashMap<String, String>) -> Result<()> {
 
     // Actr.toml
     ProjectTemplate::load_file(
-        &fixtures_root.join("rust/Actr.toml.hbs"),
+        &fixtures_root.join("rust/echo/Actr.toml.hbs"),
         files,
         "Actr.toml",
     )?;
@@ -28,7 +28,7 @@ pub fn load(files: &mut HashMap<String, String>) -> Result<()> {
 
     // README.md
     ProjectTemplate::load_file(
-        &fixtures_root.join("rust/README.md.hbs"),
+        &fixtures_root.join("rust/echo/README.md.hbs"),
         files,
         "README.md",
     )?;

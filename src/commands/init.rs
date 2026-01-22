@@ -41,18 +41,8 @@ impl Command for InitCommand {
 
         // Interactive prompt for missing required fields
         let name = self.prompt_if_missing("project name", self.name.as_ref())?;
-
-        // For Kotlin/Swift/Python, use default signaling URL if not provided
-        let signaling_url = match self.language {
-            SupportedLanguage::Kotlin | SupportedLanguage::Swift | SupportedLanguage::Python => {
-                self.signaling
-                    .clone()
-                    .unwrap_or_else(|| "wss://actrix1.develenv.com/signaling/ws".to_string())
-            }
-            SupportedLanguage::Rust => {
-                self.prompt_if_missing("signaling server URL", self.signaling.as_ref())?
-            }
-        };
+        let signaling_url =
+            self.prompt_if_missing("signaling server URL", self.signaling.as_ref())?;
 
         let (project_dir, project_name) = self.resolve_project_info(&name)?;
 
@@ -79,50 +69,15 @@ impl Command for InitCommand {
             std::fs::create_dir_all(&project_dir)?;
         }
 
-        if self.language != SupportedLanguage::Rust {
-            let context = InitContext {
-                project_dir: project_dir.clone(),
-                project_name: project_name.clone(),
-                signaling_url: signaling_url.clone(),
-                template: self.template,
-                is_current_dir: project_dir == Path::new("."),
-            };
-            initialize::execute_initialize(self.language, &context).await?;
-            info!(
-                "✅ Successfully created Actor-RTC project '{}'",
-                project_name
-            );
-            return Ok(());
-        }
+        let context = InitContext {
+            project_dir: project_dir.clone(),
+            project_name: project_name.clone(),
+            signaling_url: signaling_url.clone(),
+            template: self.template,
+            is_current_dir: project_dir == Path::new("."),
+        };
 
-        // Generate project structure
-        self.generate_project_structure(
-            &project_dir,
-            &project_name,
-            &signaling_url,
-            self.template,
-        )?;
-
-        info!(
-            "✅ Successfully created Actor-RTC project '{}'",
-            project_name
-        );
-        if project_dir != Path::new(".") {
-            info!("📁 Project created in: {}", project_dir.display());
-            info!("");
-            info!("Next steps:");
-            info!("  cd {}/client", project_dir.display());
-            info!("  actr install  # Install remote protobuf dependencies from Actr.toml");
-            info!("  actr gen                             # Generate Actor code");
-            info!("  cargo run                            # Start your work");
-        } else {
-            info!("📁 Project initialized in current directory");
-            info!("");
-            info!("Next steps:");
-            info!("  actr install  # Install remote protobuf dependencies from Actr.toml");
-            info!("  actr gen                             # Generate Actor code");
-            info!("  cargo run                            # Start your work");
-        }
+        initialize::execute_initialize(self.language, &context).await?;
 
         Ok(())
     }
@@ -131,7 +86,7 @@ impl Command for InitCommand {
 impl InitCommand {
     fn resolve_project_info(&self, name: &str) -> Result<(PathBuf, String)> {
         if name == "." {
-            // Initialize in current directory - cargo will determine the name
+            // Initialize in current directory - name will be inferred
             let project_name = if let Some(name) = &self.project_name {
                 name.clone()
             } else {
@@ -161,85 +116,6 @@ impl InitCommand {
                 .to_string();
             Ok((path, project_name))
         }
-    }
-
-    fn generate_project_structure(
-        &self,
-        project_dir: &Path,
-        project_name: &str,
-        signaling_url: &str,
-        template: ProjectTemplateName,
-    ) -> Result<()> {
-        // Always use cargo init for all scenarios
-        if project_dir == Path::new(".") {
-            // Current directory init - let cargo handle naming
-            self.init_with_cargo(project_dir, None, signaling_url, template)?;
-        } else {
-            // New directory - create it and use cargo init with explicit name
-            std::fs::create_dir_all(project_dir)?;
-            self.init_with_cargo(project_dir, Some(project_name), signaling_url, template)?;
-        }
-
-        Ok(())
-    }
-
-    fn create_actr_config(
-        &self,
-        project_dir: &Path,
-        project_name: &str,
-        signaling_url: &str,
-    ) -> Result<()> {
-        let service_type = format!("{project_name}-service");
-
-        // Create Actr.toml directly as string (Config doesn't have default_template or save_to_file)
-        let actr_toml_content = format!(
-            r#"edition = 1
-exports = []
-
-[package]
-name = "{project_name}"
-manufacturer = "my-company"
-type = "{service_type}"
-description = "An Actor-RTC service"
-authors = []
-
-[dependencies]
-
-[system.signaling]
-url = "{signaling_url}"
-
-[system.deployment]
-realm_id = 1001
-
-[system.discovery]
-visible = true
-
-[scripts]
-dev = "cargo run"
-test = "cargo test"
-"#
-        );
-
-        std::fs::write(project_dir.join("Actr.toml"), actr_toml_content)?;
-
-        info!("📄 Created Actr.toml configuration");
-        Ok(())
-    }
-
-    fn create_gitignore(&self, project_dir: &Path) -> Result<()> {
-        let gitignore_content = r#"/target
-/Cargo.lock
-.env
-.env.local
-*.log
-.DS_Store
-/src/generated/
-"#;
-
-        std::fs::write(project_dir.join(".gitignore"), gitignore_content)?;
-
-        info!("📄 Created .gitignore");
-        Ok(())
     }
 
     /// Interactive prompt for missing fields with detailed guidance
@@ -302,7 +178,7 @@ test = "cargo test"
             // Provide sensible defaults
             let default = match field_name {
                 "project name" => "my-actor-project",
-                "signaling server URL" => "wss://actrix1.develenv.com",
+                "signaling server URL" => "wss://actrix1.develenv.com/signaling/ws",
                 _ => {
                     return Err(ActrCliError::InvalidProject(format!(
                         "{field_name} cannot be empty"
@@ -349,126 +225,6 @@ test = "cargo test"
             return Err(ActrCliError::InvalidProject(
                 "Project name cannot start or end with an underscore".to_string(),
             ));
-        }
-
-        Ok(())
-    }
-
-    /// Initialize using cargo init, then enhance for Actor-RTC
-    fn init_with_cargo(
-        &self,
-        project_dir: &Path,
-        explicit_name: Option<&str>,
-        signaling_url: &str,
-        template: ProjectTemplateName,
-    ) -> Result<()> {
-        info!("🚀 Initializing Rust project with cargo...");
-
-        // Step 1: Run cargo init - let it handle all validation
-        let mut cmd = std::process::Command::new("cargo");
-        cmd.arg("init").arg("--quiet").current_dir(project_dir);
-
-        // Add explicit name if provided (for new directories)
-        if let Some(name) = explicit_name {
-            cmd.arg("--name").arg(name);
-        }
-
-        let cargo_result = cmd
-            .output()
-            .map_err(|e| ActrCliError::Command(format!("Failed to run cargo init: {e}")))?;
-
-        if !cargo_result.status.success() {
-            let error_msg = String::from_utf8_lossy(&cargo_result.stderr);
-            return Err(ActrCliError::Command(format!(
-                "cargo init failed: {error_msg}"
-            )));
-        }
-
-        // Step 2: Read the project name that cargo determined
-        let project_name = self.extract_project_name_from_cargo_toml(project_dir)?;
-        info!("📦 Rust project initialized: '{}'", project_name);
-
-        // Step 3: Enhance with Actor-RTC specific files
-        self.enhance_cargo_project_for_actr(project_dir, &project_name, signaling_url, template)?;
-
-        Ok(())
-    }
-
-    /// Extract project name from Cargo.toml generated by cargo init
-    fn extract_project_name_from_cargo_toml(&self, project_dir: &Path) -> Result<String> {
-        let cargo_toml_path = project_dir.join("Cargo.toml");
-        let cargo_content = std::fs::read_to_string(&cargo_toml_path).map_err(ActrCliError::Io)?;
-
-        // Parse TOML to extract project name
-        for line in cargo_content.lines() {
-            if line.trim().starts_with("name = ")
-                && let Some(name_part) = line.split('=').nth(1)
-            {
-                let name = name_part.trim().trim_matches('"').trim_matches('\'');
-                return Ok(name.to_string());
-            }
-        }
-
-        // Fallback to directory name if parsing fails
-        Ok("actor-service".to_string())
-    }
-
-    /// Enhance cargo-generated project with Actor-RTC specific features
-    fn enhance_cargo_project_for_actr(
-        &self,
-        project_dir: &Path,
-        project_name: &str,
-        signaling_url: &str,
-        template: ProjectTemplateName,
-    ) -> Result<()> {
-        info!("⚡ Enhancing with Actor-RTC features...");
-
-        // Create proto directory
-        let proto_dir = project_dir.join("protos");
-        std::fs::create_dir_all(&proto_dir)?;
-        info!("📁 Created protos/ directory");
-
-        // Create local.proto file using template
-        crate::commands::initialize::create_local_proto(
-            project_dir,
-            project_name,
-            "protos/local",
-            template,
-        )?;
-
-        // Generate Actr.toml
-        self.create_actr_config(project_dir, project_name, signaling_url)?;
-        info!("📄 Created Actr.toml configuration");
-
-        initialize::create_protoc_plugin_config(project_dir)?;
-
-        // Enhance Cargo.toml with Actor-RTC dependencies
-        self.enhance_cargo_toml_with_actr_deps(project_dir)?;
-        info!("📦 Enhanced Cargo.toml with Actor-RTC dependencies");
-
-        // Create .gitignore if it doesn't exist
-        let gitignore_path = project_dir.join(".gitignore");
-        if !gitignore_path.exists() {
-            self.create_gitignore(project_dir)?;
-            info!("📄 Created .gitignore");
-        }
-
-        Ok(())
-    }
-
-    /// Add Actor-RTC dependencies to existing Cargo.toml
-    fn enhance_cargo_toml_with_actr_deps(&self, project_dir: &Path) -> Result<()> {
-        let cargo_toml_path = project_dir.join("Cargo.toml");
-        let mut cargo_content =
-            std::fs::read_to_string(&cargo_toml_path).map_err(ActrCliError::Io)?;
-
-        // Add Actor-RTC dependencies if not already present
-        if !cargo_content.contains("actr-core") {
-            cargo_content.push_str("\n# Actor-RTC Framework Dependencies\n");
-            cargo_content.push_str("actr-core = { path = \"../actr-core\" }\n");
-            cargo_content.push_str("tokio = { version = \"1.0\", features = [\"full\"] }\n");
-
-            std::fs::write(&cargo_toml_path, cargo_content).map_err(ActrCliError::Io)?;
         }
 
         Ok(())

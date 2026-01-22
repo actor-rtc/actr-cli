@@ -16,11 +16,10 @@ name = "StreamEchoClient"
 stream-echo-server-python = { actr_type = "acme+StreamEchoServer" }
 
 [system.signaling]
-# When running on a physical device, do not use localhost/127.0.0.1.
 url = "{{SIGNALING_URL}}"
 
 [system.deployment]
-realm_id = 2368266035
+realm_id = {{REALM_ID}}
 
 [system.discovery]
 visible = true
@@ -33,8 +32,8 @@ tracing_service_name = "{{PROJECT_NAME}}"
 
 [system.webrtc]
 force_relay = false
-stun_urls = ["stun:actrix1.develenv.com:3478"]
-turn_urls = ["turn:actrix1.develenv.com:3478"]
+stun_urls = {{STUN_URLS}}
+turn_urls = {{TURN_URLS}}
 
 [scripts]
 dev = "xcodegen generate"

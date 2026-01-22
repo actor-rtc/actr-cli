@@ -3,17 +3,17 @@ exports = []
 
 [package]
 name = "{{PROJECT_NAME}}"
-description = "Echo client app"
-authors = ["Actr-Team"]
+description = "An Actor-RTC service"
+authors = []
 license = "Apache-2.0"
-tags = ["dev", "client"]
+tags = ["dev", "service"]
 
 [package.actr_type]
-manufacturer = "acme"
-name = "echo-client-app"
+manufacturer = "my-company"
+name = "{{PROJECT_NAME_SNAKE}}-service"
 
 [dependencies]
-echo-echo-server = { actr_type = "acme+EchoService" }
+stream-echo-server-python = { actr_type = "acme+StreamEchoServer" }
 
 [system.signaling]
 url = "{{SIGNALING_URL}}"
@@ -25,8 +25,8 @@ realm_id = {{REALM_ID}}
 visible = true
 
 [system.observability]
-filter_level = "debug"
-tracing_enabled = true
+filter_level = "info"
+tracing_enabled = false
 tracing_endpoint = "http://127.0.0.1:4317"
 tracing_service_name = "{{PROJECT_NAME}}"
 
@@ -36,11 +36,11 @@ stun_urls = {{STUN_URLS}}
 turn_urls = {{TURN_URLS}}
 
 [scripts]
-dev = "xcodegen generate"
-test = "xcodebuild test"
+dev = "cargo run"
+test = "cargo test"
 
 [acl]
 
 [[acl.rules]]
 permission = "allow"
-types = ["acme+EchoService"]
+types = ["acme+StreamEchoServer"]

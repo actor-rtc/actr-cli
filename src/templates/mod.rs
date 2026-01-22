@@ -73,6 +73,12 @@ pub struct TemplateContext {
     pub actr_protocols_version: String,
     #[serde(rename = "ACTR_LOCAL_PATH")]
     pub actr_local_path: Option<String>,
+    #[serde(rename = "REALM_ID")]
+    pub realm_id: u64,
+    #[serde(rename = "STUN_URLS")]
+    pub stun_urls: String,
+    #[serde(rename = "TURN_URLS")]
+    pub turn_urls: String,
 }
 
 impl TemplateContext {
@@ -89,6 +95,9 @@ impl TemplateContext {
             actr_swift_version: DEFAULT_ACTR_SWIFT_VERSION.to_string(),
             actr_protocols_version: DEFAULT_ACTR_PROTOCOLS_VERSION.to_string(),
             actr_local_path: std::env::var("ACTR_SWIFT_LOCAL_PATH").ok(),
+            realm_id: 2368266035,
+            stun_urls: r#"["stun:actrix1.develenv.com:3478"]"#.to_string(),
+            turn_urls: r#"["turn:actrix1.develenv.com:3478"]"#.to_string(),
         }
     }
 

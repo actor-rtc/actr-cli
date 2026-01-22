@@ -1,5 +1,6 @@
 mod kotlin;
 mod python;
+mod rust;
 mod swift;
 pub mod traits;
 
@@ -9,6 +10,7 @@ use crate::template::{ProjectTemplateName, TemplateContext};
 use handlebars::Handlebars;
 use kotlin::KotlinInitializer;
 use python::PythonInitializer;
+use rust::RustInitializer;
 use std::path::Path;
 use swift::SwiftInitializer;
 
@@ -91,9 +93,7 @@ pub struct InitializerFactory;
 impl InitializerFactory {
     pub fn get_initializer(language: SupportedLanguage) -> Result<Box<dyn ProjectInitializer>> {
         match language {
-            SupportedLanguage::Rust => Err(ActrCliError::Unsupported(
-                "Rust initialization is handled by InitCommand".to_string(),
-            )),
+            SupportedLanguage::Rust => Ok(Box::new(RustInitializer)),
             SupportedLanguage::Python => Ok(Box::new(PythonInitializer)),
             SupportedLanguage::Swift => Ok(Box::new(SwiftInitializer)),
             SupportedLanguage::Kotlin => Ok(Box::new(KotlinInitializer)),
