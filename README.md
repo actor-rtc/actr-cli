@@ -188,6 +188,29 @@ Notes:
 - Swift codegen runs `xcodegen generate` and requires `project.yml`.
 - Python/Kotlin generators are placeholders and do not emit code yet.
 
+### `actr run`
+
+Run scripts defined in `Actr.toml`.
+
+Usage:
+
+```bash
+# Run the default "run" script
+actr run
+
+# Run a named script
+actr run test
+```
+
+Configuration in `Actr.toml`:
+
+```toml
+[scripts]
+run = "cargo run"
+test = "cargo test"
+build = "cargo build --release"
+```
+
 ### `actr check`
 
 The CLI currently exposes a placeholder `check` command that prints the provided

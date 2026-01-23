@@ -40,3 +40,4 @@ pub use fingerprint::FingerprintCommand;
 pub use generate::GenCommand;
 pub use init::InitCommand;
 pub use install::InstallCommand;
+pub use run::RunCommand;

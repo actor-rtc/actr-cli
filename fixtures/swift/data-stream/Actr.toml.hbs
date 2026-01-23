@@ -16,7 +16,7 @@ name = "StreamEchoClient"
 stream-echo-server-python = { actr_type = "acme+StreamEchoServer" }
 
 [system.signaling]
-url = "{{SIGNALING_URL}}"
+url = "{{{SIGNALING_URL}}}"
 
 [system.deployment]
 realm_id = {{REALM_ID}}
@@ -32,8 +32,8 @@ tracing_service_name = "{{PROJECT_NAME}}"
 
 [system.webrtc]
 force_relay = false
-stun_urls = {{STUN_URLS}}
-turn_urls = {{TURN_URLS}}
+stun_urls = {{{STUN_URLS}}}
+turn_urls = {{{TURN_URLS}}}
 
 [scripts]
 dev = "xcodegen generate"

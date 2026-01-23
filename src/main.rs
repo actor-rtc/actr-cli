@@ -21,7 +21,7 @@ use actr_cli::core::{
 // 导入命令实现
 use actr_cli::commands::{
     CheckCommand, Command as LegacyCommand, ConfigCommand, DiscoveryCommand, DocCommand,
-    FingerprintCommand, GenCommand, InitCommand, InstallCommand,
+    FingerprintCommand, GenCommand, InitCommand, InstallCommand, RunCommand,
 };
 
 /// ACTR-CLI - Actor-RTC Command Line Tool
@@ -66,6 +66,9 @@ enum Commands {
 
     /// Manage project configuration
     Config(ConfigCommand),
+
+    /// Run project scripts
+    Run(RunCommand),
 }
 
 #[tokio::main]
@@ -278,6 +281,12 @@ async fn execute_command(
             use actr_cli::core::Command;
             cmd.execute(context).await
         }
+        Commands::Run(cmd) => match cmd.execute().await {
+            Ok(_) => Ok(actr_cli::core::CommandResult::Success(
+                "Script executed".to_string(),
+            )),
+            Err(e) => Err(e.into()),
+        },
     }
 }
 

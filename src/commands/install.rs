@@ -4,7 +4,7 @@
 
 use crate::core::{
     ActrCliError, Command, CommandContext, CommandResult, ComponentType, DependencySpec,
-    ErrorReporter, InstallResult, NetworkCheckOptions,
+    ErrorReporter, InstallResult,
 };
 use actr_config::LockFile;
 use actr_protocol::{ActrType, ActrTypeExt};
@@ -110,10 +110,28 @@ impl Command for InstallCommand {
                 fingerprint: self.fingerprint.clone(),
             }
         } else if !self.packages.is_empty() {
+            if self.fingerprint.is_some() {
+                return Err(ActrCliError::InvalidArgument {
+                    message: "Using --fingerprint requires specifying --actr-type explicitly.
+Use: actr install <ALIAS> --actr-type <TYPE> --fingerprint <FINGERPRINT>"
+                        .to_string(),
+                }
+                .into());
+            }
+
             InstallMode::AddNewPackage {
                 packages: self.packages.clone(),
             }
         } else {
+            if self.fingerprint.is_some() {
+                return Err(ActrCliError::InvalidArgument {
+                    message: "Using --fingerprint requires specifying an alias and --actr-type.
+Use: actr install <ALIAS> --actr-type <TYPE> --fingerprint <FINGERPRINT>"
+                        .to_string(),
+                }
+                .into());
+            }
+
             InstallMode::InstallFromConfig {
                 force_update: self.force_update,
             }
@@ -221,10 +239,78 @@ impl InstallCommand {
             println!("  ├─ 📋 Parsing dependency spec: {}", package);
 
             // Discover service details
-            let service_details = install_pipeline
-                .validation_pipeline()
-                .service_discovery()
-                .get_service_details(package)
+            // The service_details in install_pipeline is designed to fetch specific service details directly
+            // However, we want to support interactive selection if multiple services match (or same service with multiple versions)
+            // But get_service_details currently only returns one service or error
+            // To support interactive selection, we need to use discover_services first
+
+            let service_discovery = install_pipeline.validation_pipeline().service_discovery();
+            let ui = context.container.lock().unwrap().get_user_interface()?;
+
+            // First, try to discover services matching the name
+            // We create a filter for the name
+            let filter = crate::core::ServiceFilter {
+                name_pattern: Some(package.clone()),
+                version_range: None,
+                tags: None,
+            };
+
+            let services = service_discovery.discover_services(Some(&filter)).await?;
+
+            let selected_service = if services.is_empty() {
+                // If no services found by discovery, fall back to get_service_details which might have different lookup logic
+                // or just error out with the nice message we added earlier
+                match service_discovery.get_service_details(package).await {
+                    Ok(details) => details.info,
+                    Err(_) => {
+                        println!("  └─ ⚠️  Service not found: {}", package);
+                        println!();
+                        println!(
+                            "💡 Tip: If you want to specify a fingerprint, use the full command:"
+                        );
+                        println!(
+                            "      actr install {} --actr-type <TYPE> --fingerprint <FINGERPRINT>",
+                            package
+                        );
+                        println!();
+                        return Err(anyhow::anyhow!("Service not found"));
+                    }
+                }
+            } else if services.len() == 1 {
+                // Only one service found, auto-select
+                let service = services[0].clone();
+                println!("  ├─ 🔍 Automatically selected service: {}", service.name);
+                service
+            } else {
+                // Multiple services found, ask user to select
+                println!(
+                    "  ├─ 🔍 Found {} services matching '{}'",
+                    services.len(),
+                    package
+                );
+
+                // Format items for selection
+                let items: Vec<String> = services
+                    .iter()
+                    .map(|s| {
+                        format!(
+                            "{} ({}) - {}",
+                            s.name,
+                            s.fingerprint.chars().take(8).collect::<String>(),
+                            s.actr_type.to_string_repr()
+                        )
+                    })
+                    .collect();
+
+                let selection_index = ui
+                    .select_from_list(&items, "Please select a service to install")
+                    .await?;
+
+                services[selection_index].clone()
+            };
+
+            let service_details = service_discovery
+                .get_service_details(&selected_service.name)
                 .await?;
 
             println!(
@@ -232,22 +318,14 @@ impl InstallCommand {
                 service_details.info.fingerprint
             );
 
-            // Connectivity check
-            let connectivity = install_pipeline
-                .validation_pipeline()
-                .network_validator()
-                .check_connectivity(package, &NetworkCheckOptions::default())
-                .await?;
+            // Connectivity check - Skipped for install as we only need metadata
+            // let connectivity = install_pipeline
+            //     .validation_pipeline()
+            //     .network_validator()
+            //     .check_connectivity(package, &NetworkCheckOptions::default())
+            //     .await?;
 
-            if connectivity.is_reachable {
-                println!("  ├─ 🌐 Network connectivity test ✅");
-            } else {
-                println!("  └─ ❌ Network connection failed");
-                return Err(anyhow::anyhow!(
-                    "Network connectivity test failed for {}",
-                    package,
-                ));
-            }
+            println!("  ├─ 🌐 Network connectivity test (Skipped) ✅");
 
             // Fingerprint check
             println!("  ├─ 🔐 Fingerprint integrity verification ✅");
@@ -359,22 +437,14 @@ impl InstallCommand {
             println!("  ├─ 🔐 Fingerprint verification ✅");
         }
 
-        // Connectivity check
-        let connectivity = install_pipeline
-            .validation_pipeline()
-            .network_validator()
-            .check_connectivity(&service_name, &NetworkCheckOptions::default())
-            .await?;
+        // Connectivity check - Skipped for install as we only need metadata
+        // let connectivity = install_pipeline
+        //     .validation_pipeline()
+        //     .network_validator()
+        //     .check_connectivity(&service_name, &NetworkCheckOptions::default())
+        //     .await?;
 
-        if connectivity.is_reachable {
-            println!("  ├─ 🌐 Network connectivity test ✅");
-        } else {
-            println!("  └─ ❌ Network connection failed");
-            return Err(anyhow::anyhow!(
-                "Network connectivity test failed for {}",
-                service_name,
-            ));
-        }
+        println!("  ├─ 🌐 Network connectivity test (Skipped) ✅");
 
         // Create dependency spec with alias
         let resolved_spec = DependencySpec {
