@@ -25,6 +25,9 @@ struct ServiceInfo {
     remote_target_type: Option<String>,
     /// List of RPC methods in this service
     methods: Vec<MethodInfo>,
+    /// Whether the proto file outer class needs "OuterClass" suffix
+    /// (true when file name PascalCase conflicts with a message/service/enum name)
+    needs_outer_class_suffix: bool,
 }
 
 /// Information about an RPC method
@@ -243,14 +246,76 @@ impl KotlinGenerator {
             }
         }
 
+        // Determine if the outer class needs "OuterClass" suffix
+        // protobuf-java adds this suffix when the file name (in PascalCase) conflicts
+        // with a message, service, or enum name defined in the proto file.
+        //
+        // Example: stream_client.proto -> StreamClient (PascalCase)
+        //          If there's "message StreamClient" or "service StreamClient" -> needs suffix
+        //
+        // Example: echo.proto -> Echo (PascalCase)
+        //          If there's "service EchoService" (different) -> no suffix needed
+
+        // Convert file name to PascalCase (what protobuf would use as outer class name)
+        let file_stem = proto_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown");
+        let outer_class_base_name = to_pascal_case(file_stem);
+
+        // Extract all message, service, and enum names from proto
+        let mut declared_names: Vec<String> = Vec::new();
+
+        for line in proto_content.lines() {
+            let trimmed = line.trim();
+
+            // Check for message declarations
+            if trimmed.starts_with("message ") {
+                if let Some(name) = trimmed
+                    .strip_prefix("message ")
+                    .and_then(|s| s.split_whitespace().next())
+                    .map(|s| s.trim_end_matches('{'))
+                {
+                    declared_names.push(name.to_string());
+                }
+            }
+
+            // Check for service declarations
+            if trimmed.starts_with("service ") {
+                if let Some(name) = trimmed
+                    .strip_prefix("service ")
+                    .and_then(|s| s.split_whitespace().next())
+                    .map(|s| s.trim_end_matches('{'))
+                {
+                    declared_names.push(name.to_string());
+                }
+            }
+
+            // Check for enum declarations
+            if trimmed.starts_with("enum ") {
+                if let Some(name) = trimmed
+                    .strip_prefix("enum ")
+                    .and_then(|s| s.split_whitespace().next())
+                    .map(|s| s.trim_end_matches('{'))
+                {
+                    declared_names.push(name.to_string());
+                }
+            }
+        }
+
+        let needs_outer_class_suffix = declared_names.contains(&outer_class_base_name);
+
         debug!(
-            "analyze_proto_file: {} -> service={}, package={}, is_local={}, remote_target_type={:?}, methods={}",
+            "analyze_proto_file: {} -> service={}, package={}, is_local={}, remote_target_type={:?}, methods={}, outer_class_base={}, declared_names={:?}, needs_suffix={}",
             proto_path.display(),
             service_name,
             proto_package,
             is_local,
             remote_target_type,
-            methods.len()
+            methods.len(),
+            outer_class_base_name,
+            declared_names,
+            needs_outer_class_suffix
         );
 
         Some(ServiceInfo {
@@ -260,6 +325,7 @@ impl KotlinGenerator {
             is_local,
             remote_target_type,
             methods,
+            needs_outer_class_suffix,
         })
     }
 
@@ -367,9 +433,17 @@ import io.actor_rtc.actr.RpcEnvelopeBridge
         ));
 
         // Import protobuf message types for all services
+        // Protobuf Java Lite generates outer class with PascalCase file name
+        // The outer class name is file_name in PascalCase (e.g., echo.proto -> Echo, stream_client.proto -> StreamClient)
+        // If the PascalCase name conflicts with a message/service/enum name, protobuf adds "OuterClass" suffix
         code.push_str("// Import protobuf message types\n");
         for service in services {
-            let outer_class = to_pascal_case(&service.proto_file_name.replace(".proto", ""));
+            let file_stem = service.proto_file_name.replace(".proto", "");
+            let outer_class = if service.needs_outer_class_suffix {
+                format!("{}OuterClass", to_pascal_case(&file_stem))
+            } else {
+                to_pascal_case(&file_stem)
+            };
             code.push_str(&format!(
                 "import {}.{}.*\n",
                 service.proto_package, outer_class
@@ -627,7 +701,9 @@ impl LanguageGenerator for KotlinGenerator {
 
             // Use protoc with the Kotlin plugin
             let mut cmd = StdCommand::new("protoc");
-            cmd.arg(format!("--proto_path={}", proto_dir.display()))
+            // Add the main input path (protos directory) as include path for imports
+            cmd.arg(format!("--proto_path={}", context.input_path.display()))
+                .arg(format!("--proto_path={}", proto_dir.display()))
                 .arg(format!(
                     "--plugin=protoc-gen-actrframework-kotlin={}",
                     plugin_path.display()
@@ -892,7 +968,7 @@ import io.actor_rtc.actr.WorkloadBridge
  */
 class UnifiedWorkload(
     {handler_field}
-    private val realmId: UInt = 2281844430u
+    private val realmId: UInt = 2368266035u
 ) : WorkloadBridge {{
 
     companion object {{
@@ -966,7 +1042,14 @@ package {base_package}
     let mut method_impls = String::new();
 
     for service in &local_services {
-        let outer_class = to_pascal_case(&service.proto_file_name.replace(".proto", ""));
+        let outer_class = if service.needs_outer_class_suffix {
+            format!(
+                "{}OuterClass",
+                to_pascal_case(&service.proto_file_name.replace(".proto", ""))
+            )
+        } else {
+            to_pascal_case(&service.proto_file_name.replace(".proto", ""))
+        };
         imports.push_str(&format!(
             "import {}.{}.*\n",
             service.proto_package, outer_class

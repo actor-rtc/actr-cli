@@ -47,43 +47,42 @@ protobuf {
 }
 
 // Copy proto files from protos/remote and protos/local to src/main/proto for protobuf plugin
-val copyProtos = tasks.register<Copy>("copyProtos") {
-    from("${rootProject.projectDir}/protos/remote") {
-        include("**/*.proto")
-    }
-    from("${rootProject.projectDir}/protos/local") {
-        include("**/*.proto")
-    }
-    into("src/main/proto")
-}
+val copyProtos =
+        tasks.register<Copy>("copyProtos") {
+            from("${rootProject.projectDir}/protos/remote") { include("**/*.proto") }
+            from("${rootProject.projectDir}/protos/local") { include("**/*.proto") }
+            into("src/main/proto")
+        }
 
 // Copy Actr.lock.toml to assets for runtime service resolution
-val copyLockFile = tasks.register<Copy>("copyLockFile") {
-    from("${rootProject.projectDir}/Actr.lock.toml")
-    into("src/main/assets")
-}
+val copyLockFile =
+        tasks.register<Copy>("copyLockFile") {
+            from("${rootProject.projectDir}/Actr.lock.toml")
+            into("src/main/assets")
+        }
 
 // Copy Actr.toml to assets for runtime configuration
-val copyActrConfig = tasks.register<Copy>("copyActrConfig") {
-    from("${rootProject.projectDir}/Actr.toml")
-    into("src/main/assets")
-}
+val copyActrConfig =
+        tasks.register<Copy>("copyActrConfig") {
+            from("${rootProject.projectDir}/Actr.toml")
+            into("src/main/assets")
+        }
 
 // Make proto generation depend on copyProtos
 afterEvaluate {
-    tasks.matching { it.name.startsWith("generateProto") || it.name.startsWith("extractProto") }
-        .configureEach { dependsOn(copyProtos) }
+    tasks
+            .matching { it.name.startsWith("generateProto") || it.name.startsWith("extractProto") }
+            .configureEach { dependsOn(copyProtos) }
     // Make compile tasks depend on copyLockFile and copyActrConfig
-    tasks.matching { it.name.startsWith("merge") && it.name.contains("Assets") }
-        .configureEach {
-            dependsOn(copyLockFile)
-            dependsOn(copyActrConfig)
-        }
+    tasks.matching { it.name.startsWith("merge") && it.name.contains("Assets") }.configureEach {
+        dependsOn(copyLockFile)
+        dependsOn(copyActrConfig)
+    }
 }
 
 dependencies {
     // actr-kotlin library from JitPack
-    implementation("com.github.actor-rtc:actr-kotlin:089464a") {
+    implementation("com.github.actor-rtc:actr-kotlin:5ae5676") {
         exclude(group = "net.java.dev.jna", module = "jna")
     }
 
@@ -99,6 +98,18 @@ dependencies {
     implementation("com.google.android.material:material:1.11.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
 
+    // Lifecycle
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0")
+
+    // Coroutines
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
+
+    // Testing
+    testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
+}
     // Lifecycle
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0")
