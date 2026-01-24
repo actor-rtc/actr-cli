@@ -270,36 +270,33 @@ impl KotlinGenerator {
             let trimmed = line.trim();
 
             // Check for message declarations
-            if trimmed.starts_with("message ") {
-                if let Some(name) = trimmed
+            if trimmed.starts_with("message ")
+                && let Some(name) = trimmed
                     .strip_prefix("message ")
                     .and_then(|s| s.split_whitespace().next())
                     .map(|s| s.trim_end_matches('{'))
-                {
-                    declared_names.push(name.to_string());
-                }
+            {
+                declared_names.push(name.to_string());
             }
 
             // Check for service declarations
-            if trimmed.starts_with("service ") {
-                if let Some(name) = trimmed
+            if trimmed.starts_with("service ")
+                && let Some(name) = trimmed
                     .strip_prefix("service ")
                     .and_then(|s| s.split_whitespace().next())
                     .map(|s| s.trim_end_matches('{'))
-                {
-                    declared_names.push(name.to_string());
-                }
+            {
+                declared_names.push(name.to_string());
             }
 
             // Check for enum declarations
-            if trimmed.starts_with("enum ") {
-                if let Some(name) = trimmed
+            if trimmed.starts_with("enum ")
+                && let Some(name) = trimmed
                     .strip_prefix("enum ")
                     .and_then(|s| s.split_whitespace().next())
                     .map(|s| s.trim_end_matches('{'))
-                {
-                    declared_names.push(name.to_string());
-                }
+            {
+                declared_names.push(name.to_string());
             }
         }
 
