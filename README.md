@@ -37,6 +37,20 @@ Swift init/codegen:
 - `xcodegen`
 - `project.yml` present in the project root for `xcodegen generate`
 
+## Install (Homebrew)
+
+```bash
+brew tap actor-rtc/tap
+brew install actr-cli
+```
+
+Update to the latest version:
+
+```bash
+brew update
+brew upgrade actr-cli
+```
+
 ## Install (from source)
 
 ```bash
@@ -65,6 +79,16 @@ Create a Swift project:
 actr init my-app --signaling ws://127.0.0.1:8080 --language swift --template echo
 # Or use the data-stream template
 actr init my-app --signaling ws://127.0.0.1:8080 --language swift --template data-stream
+```
+
+Swift echo template minimal flow:
+
+```bash
+actr init --template echo -l swift echoApp
+cd echoApp
+actr install
+actr gen -l swift
+open EchoApp.xcodeproj
 ```
 
 ## Commands

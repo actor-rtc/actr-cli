@@ -35,6 +35,20 @@ Swift 初始化/代码生成：
 - `xcodegen`
 - 项目根目录存在 `project.yml`（供 `xcodegen generate` 使用）
 
+## 通过 Homebrew 安装
+
+```bash
+brew tap actor-rtc/tap
+brew install actr-cli
+```
+
+更新到最新版本：
+
+```bash
+brew update
+brew upgrade actr-cli
+```
+
 ## 从源码安装
 
 ```bash
@@ -63,6 +77,16 @@ actr gen
 actr init my-app --signaling ws://127.0.0.1:8080 --language swift --template echo
 # 或者使用 data-stream 模板
 actr init my-app --signaling ws://127.0.0.1:8080 --language swift --template data-stream
+```
+
+Swift echo 模板最小流程：
+
+```bash
+actr init --template echo -l swift echoApp
+cd echoApp
+actr install
+actr gen -l swift
+open EchoApp.xcodeproj
 ```
 
 ## 命令

@@ -9,12 +9,14 @@ use self::kotlin::KotlinTemplate;
 use self::python::PythonTemplate;
 use self::rust::RustTemplate;
 use self::swift::SwiftTemplate;
-use crate::error::Result;
+use crate::assets::FixtureAssets;
+use crate::error::{ActrCliError, Result};
 use crate::utils::{to_pascal_case, to_snake_case};
 use clap::ValueEnum;
 use handlebars::Handlebars;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::io::ErrorKind;
 use std::path::Path;
 
 pub use crate::commands::SupportedLanguage;
@@ -156,7 +158,36 @@ impl ProjectTemplate {
         files: &mut HashMap<String, String>,
         key: &str,
     ) -> Result<()> {
-        let content = std::fs::read_to_string(fixture_path)?;
+        let content = if fixture_path.exists() {
+            std::fs::read_to_string(fixture_path)?
+        } else {
+            // Read from embedded fixtures when running from packaged binaries.
+            let fixtures_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures");
+            let relative = fixture_path
+                .strip_prefix(&fixtures_root)
+                .map_err(|_| {
+                    ActrCliError::Io(std::io::Error::new(
+                        ErrorKind::NotFound,
+                        format!("Fixture not found: {}", fixture_path.display()),
+                    ))
+                })?
+                .to_string_lossy()
+                .replace('\\', "/");
+            let file = FixtureAssets::get(&relative).ok_or_else(|| {
+                ActrCliError::Io(std::io::Error::new(
+                    ErrorKind::NotFound,
+                    format!("Embedded fixture not found: {}", relative),
+                ))
+            })?;
+            std::str::from_utf8(file.data.as_ref())
+                .map_err(|error| {
+                    ActrCliError::Io(std::io::Error::new(
+                        ErrorKind::InvalidData,
+                        format!("Invalid UTF-8 fixture {}: {}", relative, error),
+                    ))
+                })?
+                .to_string()
+        };
         files.insert(key.to_string(), content);
         Ok(())
     }
