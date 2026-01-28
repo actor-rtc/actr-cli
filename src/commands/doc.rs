@@ -2,7 +2,7 @@
 //!
 //! Now uses Handlebars templates and embedded assets for maintainability and portability.
 
-use crate::assets::TemplateAssets;
+use crate::assets::FixtureAssets;
 use crate::commands::Command;
 use crate::error::{ActrCliError, Result};
 use actr_config::{Config, ConfigParser};
@@ -150,8 +150,8 @@ impl DocCommand {
 
         // Helper to load template from assets
         let load_template = |name: &str| -> Result<String> {
-            let path = format!("doc/{}.hbs", name);
-            let file = TemplateAssets::get(&path).ok_or_else(|| {
+            let path = format!("templates/doc/{}.hbs", name);
+            let file = FixtureAssets::get(&path).ok_or_else(|| {
                 ActrCliError::Internal(anyhow::anyhow!("Template not found: {}", path))
             })?;
             let content = std::str::from_utf8(file.data.as_ref())

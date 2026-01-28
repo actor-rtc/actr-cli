@@ -1,6 +1,7 @@
 use super::{InitContext, ProjectInitializer, create_local_proto, create_protoc_plugin_config};
-use crate::error::{ActrCliError, Result};
+use crate::error::Result;
 use crate::templates::ProjectTemplateName;
+use crate::utils::read_fixture_text;
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use tracing::info;
@@ -145,12 +146,7 @@ impl KotlinInitializer {
         ];
 
         for (fixture_path, output_path) in files {
-            let template = std::fs::read_to_string(&fixture_path).map_err(|e| {
-                ActrCliError::Io(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    format!("Failed to read fixture {}: {}", fixture_path.display(), e),
-                ))
-            })?;
+            let template = read_fixture_text(&fixture_path)?;
             let rendered = apply_placeholders(&template, &replacements);
             write_file(&output_path, &rendered)?;
         }
@@ -266,12 +262,7 @@ impl KotlinInitializer {
         ];
 
         for (fixture_path, output_path) in files {
-            let template = std::fs::read_to_string(&fixture_path).map_err(|e| {
-                ActrCliError::Io(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    format!("Failed to read fixture {}: {}", fixture_path.display(), e),
-                ))
-            })?;
+            let template = read_fixture_text(&fixture_path)?;
             let rendered = apply_placeholders(&template, &replacements);
             write_file(&output_path, &rendered)?;
         }

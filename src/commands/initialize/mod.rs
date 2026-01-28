@@ -7,6 +7,7 @@ pub mod traits;
 use crate::commands::SupportedLanguage;
 use crate::error::{ActrCliError, Result};
 use crate::template::{ProjectTemplateName, TemplateContext};
+use crate::utils::read_fixture_text;
 use handlebars::Handlebars;
 use kotlin::KotlinInitializer;
 use python::PythonInitializer;
@@ -56,16 +57,7 @@ pub fn create_local_proto(
     };
     let template_path = fixtures_root.join("protos").join(template_file_name);
 
-    let template_content = std::fs::read_to_string(&template_path).map_err(|e| {
-        ActrCliError::Io(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!(
-                "Failed to read proto template {}: {}",
-                template_path.display(),
-                e
-            ),
-        ))
-    })?;
+    let template_content = read_fixture_text(&template_path)?;
 
     // Create template context
     let template_context = TemplateContext::new(project_name, "", "");

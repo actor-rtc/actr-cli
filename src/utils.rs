@@ -1,6 +1,8 @@
 //! Utility functions for actr-cli
 
+use crate::assets::FixtureAssets;
 use crate::error::{ActrCliError, Result};
+use std::io::ErrorKind;
 use std::path::Path;
 use std::process::{Command, Output};
 use std::time::Duration;
@@ -146,6 +148,50 @@ pub fn ensure_dir_exists(path: &Path) -> Result<()> {
         std::fs::create_dir_all(path)?;
     }
     Ok(())
+}
+
+/// Read a fixture file, falling back to embedded assets when not on disk.
+pub fn read_fixture_text(fixture_path: &Path) -> Result<String> {
+    if fixture_path.exists() {
+        return std::fs::read_to_string(fixture_path).map_err(|error| {
+            ActrCliError::Io(std::io::Error::new(
+                error.kind(),
+                format!(
+                    "Failed to read fixture {}: {}",
+                    fixture_path.display(),
+                    error
+                ),
+            ))
+        });
+    }
+
+    let fixtures_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures");
+    let relative = fixture_path
+        .strip_prefix(&fixtures_root)
+        .map_err(|_| {
+            ActrCliError::Io(std::io::Error::new(
+                ErrorKind::NotFound,
+                format!("Fixture not found: {}", fixture_path.display()),
+            ))
+        })?
+        .to_string_lossy()
+        .replace('\\', "/");
+
+    let file = FixtureAssets::get(&relative).ok_or_else(|| {
+        ActrCliError::Io(std::io::Error::new(
+            ErrorKind::NotFound,
+            format!("Embedded fixture not found: {}", relative),
+        ))
+    })?;
+
+    let content = std::str::from_utf8(file.data.as_ref()).map_err(|error| {
+        ActrCliError::Io(std::io::Error::new(
+            ErrorKind::InvalidData,
+            format!("Invalid UTF-8 fixture {}: {}", relative, error),
+        ))
+    })?;
+
+    Ok(content.to_string())
 }
 
 /// Fetch the latest tag from a git repository with a timeout
