@@ -143,6 +143,9 @@ impl ProjectTemplate {
             SupportedLanguage::Kotlin => Box::new(KotlinTemplate),
             SupportedLanguage::Python => Box::new(PythonTemplate),
             SupportedLanguage::Rust => Box::new(RustTemplate),
+            SupportedLanguage::Typescript => {
+                unreachable!("TypeScript does not use project templates")
+            }
         };
 
         Self {

@@ -2,6 +2,7 @@ mod kotlin;
 mod python;
 mod swift;
 mod traits;
+mod typescript;
 
 pub use crate::commands::SupportedLanguage;
 use crate::error::Result;
@@ -10,6 +11,7 @@ use python::PythonGenerator;
 use swift::SwiftGenerator;
 use tracing::info;
 pub use traits::{GenContext, LanguageGenerator, ScaffoldType};
+use typescript::TypescriptGenerator;
 
 pub struct GeneratorFactory;
 
@@ -20,6 +22,7 @@ impl GeneratorFactory {
             SupportedLanguage::Python => Box::new(PythonGenerator),
             SupportedLanguage::Swift => Box::new(SwiftGenerator),
             SupportedLanguage::Kotlin => Box::new(KotlinGenerator),
+            SupportedLanguage::Typescript => Box::new(TypescriptGenerator),
         }
     }
 }

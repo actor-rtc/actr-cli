@@ -29,6 +29,7 @@ pub enum SupportedLanguage {
     Python,
     Swift,
     Kotlin,
+    Typescript,
 }
 
 // Re-export new architecture commands

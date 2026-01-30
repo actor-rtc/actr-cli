@@ -97,6 +97,9 @@ impl InitializerFactory {
             SupportedLanguage::Python => Ok(Box::new(PythonInitializer)),
             SupportedLanguage::Swift => Ok(Box::new(SwiftInitializer)),
             SupportedLanguage::Kotlin => Ok(Box::new(KotlinInitializer)),
+            SupportedLanguage::Typescript => Err(ActrCliError::command_error(
+                "TypeScript 项目初始化不支持。请使用 npm/yarn 初始化 TypeScript 项目。",
+            )),
         }
     }
 }

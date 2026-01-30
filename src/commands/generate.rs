@@ -190,6 +190,10 @@ impl GenCommand {
                 // Python default: generated
                 Ok(PathBuf::from("generated"))
             }
+            SupportedLanguage::Typescript => {
+                // TypeScript default: src/generated
+                Ok(PathBuf::from("src/generated"))
+            }
             SupportedLanguage::Rust => {
                 // Rust default: src/generated
                 Ok(PathBuf::from("src/generated"))

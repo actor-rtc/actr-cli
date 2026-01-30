@@ -80,6 +80,7 @@ md5 = "0.7"
 sha2 = "0.10"
 hex = "0.4"
 url = "2.5"
+regex = "1.11"
 
 # Protocol buffer generation
 prost-build = "0.14.1"
@@ -90,7 +91,7 @@ prost-types = "0.14.1"
 quote = "1.0"
 proc-macro2 = "1.0"
 bytes = "1.0"
-heck = "0.5.0"                                   # for case conversion
+heck = "0.5.0"                                                        # for case conversion
 tokio-tungstenite = { version = "0.28.0", features = ["native-tls"] }
 futures-util = "0.3.31"
 uuid = { version = "1.19.0", features = ["v4"] }
