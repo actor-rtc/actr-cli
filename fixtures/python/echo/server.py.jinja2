@@ -19,11 +19,11 @@ from generated.local import {{PROJECT_NAME_SNAKE}}_pb2 as pb2
 from generated import {{PROJECT_NAME_SNAKE}}_service_actor as server_actor
 
 
-class {{PROJECT_NAME_PASCAL}}Service(server_actor.{{PROJECT_NAME_PASCAL}}ServiceHandler):
-    async def {{PROJECT_NAME_SNAKE}}(self, req: pb2.{{PROJECT_NAME_PASCAL}}Request, ctx: Context) -> pb2.{{PROJECT_NAME_PASCAL}}Response:
+class {{PROJECT_NAME_PASCAL}}Service(server_actor.EchoServiceHandler):
+    async def echo(self, req: pb2.EchoRequest, ctx: Context) -> pb2.EchoResponse:
         logger.info("server received: %s", req.message)
-        return pb2.{{PROJECT_NAME_PASCAL}}Response(
-            reply=f"{{PROJECT_NAME_PASCAL}}: {req.message}",
+        return pb2.EchoResponse(
+            reply=f"Echo: {req.message}",
             timestamp=int(time.time()),
         )
 
@@ -31,7 +31,7 @@ class {{PROJECT_NAME_PASCAL}}Service(server_actor.{{PROJECT_NAME_PASCAL}}Service
 class {{PROJECT_NAME_PASCAL}}ServerWorkload(WorkloadBase):
     def __init__(self, handler: {{PROJECT_NAME_PASCAL}}Service):
         self.handler = handler
-        super().__init__(server_actor.{{PROJECT_NAME_PASCAL}}ServiceDispatcher())
+        super().__init__(server_actor.EchoServiceDispatcher())
 
     async def on_start(self, ctx: Context) -> None:
         logger.info("{{PROJECT_NAME_PASCAL}}ServerWorkload on_start")

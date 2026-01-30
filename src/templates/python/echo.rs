@@ -43,10 +43,11 @@ pub fn load(files: &mut HashMap<String, String>) -> Result<()> {
     let proto_fixtures = fixtures_root.join("protos");
 
     // Server: echo service definition
+    // Note: Use PROJECT_NAME_SNAKE in filename so protoc generates matching pb2 filename
     ProjectTemplate::load_file(
         &proto_fixtures.join("echo_service.hbs"),
         files,
-        "server/protos/local/echo.proto",
+        "server/protos/local/{{PROJECT_NAME_SNAKE}}.proto",
     )?;
 
     // Client: empty local.proto
