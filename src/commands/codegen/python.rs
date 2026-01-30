@@ -686,8 +686,11 @@ impl PythonGenerator {
             .map(|s| s.to_string())
             .unwrap_or_else(|| "proto".to_string());
 
-        let actor_module = if let Some(service) = services.first() {
-            format!("{}_actor", to_snake_case(&service.name))
+        let actor_module = if let Some(_service) = services.first() {
+            // Use package name (proto_module) instead of service name to match
+            // the actual generated filename from framework-codegen-python
+            // e.g., "add_service" -> "add_service_service_actor"
+            format!("{}_service_actor", proto_module)
         } else {
             // For client workloads, use proto_module + "_workload"
             format!("{}_workload", proto_module)
