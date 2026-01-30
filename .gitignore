@@ -27,3 +27,4 @@ my-actor-project
 .*
 !.gitignore
 !.github
+docs/
