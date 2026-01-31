@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "actr-cli"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "actr-config",
  "actr-framework-protoc-codegen",
